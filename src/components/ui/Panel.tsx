@@ -9,7 +9,8 @@ export function Panel(props: {
   return (
     <div
       className={[
-        'rounded-lg border border-zinc-800 bg-zinc-900/30 backdrop-blur-sm',
+        // flex+min-h-0 makes nested panels (Monaco, scroll areas) size correctly
+        'flex min-h-0 flex-col rounded-lg border border-zinc-800 bg-zinc-900/30 backdrop-blur-sm',
         props.className ?? '',
       ].join(' ')}
     >
@@ -19,7 +20,7 @@ export function Panel(props: {
           <div className="text-xs text-zinc-400">{props.right}</div>
         </div>
       )}
-      <div className="min-h-0">{props.children}</div>
+      <div className="min-h-0 flex-1">{props.children}</div>
     </div>
   )
 }

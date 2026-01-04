@@ -14,13 +14,18 @@ import type { PluginNode, PluginNodeData } from '../types/saw'
 import { plugins, getPlugin } from '../mock/plugins'
 import { generateAiPlan } from '../mock/ai'
 import { makeMockCode, makeMockCodeIndex, makeMockGitPreview } from '../mock/codegen'
-import { getAiStatus, requestAiPlan } from '../ai/client'
+import { getAiStatus, requestAiChat, requestAiPlan, type ChatMessage } from '../ai/client'
 import type { AiStatus } from '../types/ai'
 import { decodeAudioFile, renderLowpass } from '../audio/webaudio'
 
-type BottomTab = 'logs' | 'errors' | 'ai' | 'dev'
+type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev'
 
 type EditorState = {
+  open: boolean
+  nodeId: string | null
+}
+
+type FullscreenState = {
   open: boolean
   nodeId: string | null
 }
@@ -33,6 +38,7 @@ type SawState = {
   selectedNodeId: string | null
   editableMode: boolean
   editor: EditorState
+  fullscreen: FullscreenState
   bottomTab: BottomTab
   goalText: string
   logs: string[]
@@ -41,6 +47,8 @@ type SawState = {
   aiBusy: boolean
   aiStatus: AiStatus | null
   layoutMode: LayoutMode
+  chatBusy: boolean
+  chat: { messages: ChatMessage[] }
 
   onNodesChange: (changes: NodeChange[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
@@ -62,8 +70,11 @@ type SawState = {
   openEditor: (nodeId: string) => void
   closeEditor: () => void
   updateNodeCode: (nodeId: string, code: string) => void
+  openFullscreen: (nodeId: string) => void
+  closeFullscreen: () => void
   refreshAiStatus: () => Promise<void>
   submitGoal: (goal: string) => Promise<void>
+  sendChat: (text: string) => Promise<void>
 
   // Audio plugin (real WebAudio)
   loadMp3ToNode: (nodeId: string, file: File) => Promise<void>
@@ -73,6 +84,10 @@ type SawState = {
   // Layout
   layout: { leftWidth: number; rightWidth: number; bottomHeight: number }
   setLayout: (patch: Partial<SawState['layout']>) => void
+
+  consoleFullscreen: boolean
+  openConsoleFullscreen: () => void
+  closeConsoleFullscreen: () => void
 }
 
 function id(prefix = 'n') {
@@ -133,6 +148,7 @@ export const useSawStore = create<SawState>((set, get) => ({
   selectedNodeId: null,
   editableMode: false,
   editor: { open: false, nodeId: null },
+  fullscreen: { open: false, nodeId: null },
   bottomTab: 'logs',
   goalText: '',
   logs: [
@@ -153,8 +169,19 @@ export const useSawStore = create<SawState>((set, get) => ({
   ],
   aiBusy: false,
   aiStatus: null,
+  chatBusy: false,
+  chat: {
+    messages: [
+      {
+        role: 'assistant',
+        content:
+          'SAW Chat is ready. Ask for pipeline help, debugging ideas, or how to use a module.',
+      },
+    ],
+  },
   layoutMode: 'pipeline',
   layout: { leftWidth: 280, rightWidth: 340, bottomHeight: 240 },
+  consoleFullscreen: false,
 
   onNodesChange: (changes) => set({ nodes: applyNodeChanges(changes, get().nodes) as PluginNode[] }),
   onEdgesChange: (changes) => set({ edges: applyEdgeChanges(changes, get().edges) }),
@@ -165,6 +192,8 @@ export const useSawStore = create<SawState>((set, get) => ({
   setGoalText: (goalText) => set({ goalText }),
   setLayoutMode: (layoutMode) => set({ layoutMode }),
   setLayout: (patch) => set((s) => ({ layout: { ...s.layout, ...patch } })),
+  openConsoleFullscreen: () => set({ consoleFullscreen: true }),
+  closeConsoleFullscreen: () => set({ consoleFullscreen: false }),
 
   addNodeFromPlugin: (pluginId, position) => {
     const nodeId = id('node')
@@ -233,12 +262,15 @@ export const useSawStore = create<SawState>((set, get) => ({
       const selectedNodeId = s.selectedNodeId === nodeId ? null : s.selectedNodeId
       const editor =
         s.editor.nodeId === nodeId ? { open: false, nodeId: null } : s.editor
+      const fullscreen =
+        s.fullscreen.nodeId === nodeId ? { open: false, nodeId: null } : s.fullscreen
       return {
         ...s,
         nodes: nextNodes,
         edges: nextEdges,
         selectedNodeId,
         editor,
+        fullscreen,
         logs: [...s.logs, `[graph] deleted node ${nodeId}`],
       }
     })
@@ -347,6 +379,8 @@ export const useSawStore = create<SawState>((set, get) => ({
 
   openEditor: (nodeId) => set({ editor: { open: true, nodeId } }),
   closeEditor: () => set({ editor: { open: false, nodeId: null } }),
+  openFullscreen: (nodeId) => set({ fullscreen: { open: true, nodeId } }),
+  closeFullscreen: () => set({ fullscreen: { open: false, nodeId: null } }),
 
   updateNodeCode: (nodeId, code) => {
     set((s) => ({
@@ -368,6 +402,58 @@ export const useSawStore = create<SawState>((set, get) => ({
       set({ aiStatus: status })
     } catch {
       set({ aiStatus: { enabled: false, model: 'unknown' } })
+    }
+  },
+
+  sendChat: async (text) => {
+    const content = text.trim()
+    if (!content) return
+
+    set({ chatBusy: true })
+    set((s) => ({
+      bottomTab: 'chat',
+      chat: { messages: [...s.chat.messages, { role: 'user', content }] },
+      logs: [...s.logs, '[chat] user message'],
+    }))
+
+    const state = get()
+    const selected = state.nodes.find((n) => n.id === state.selectedNodeId) ?? null
+    const pipelineSummary = state.nodes.map((n, i) => `${i + 1}. ${n.data.pluginId}`).join('\n')
+
+    const context: ChatMessage = {
+      role: 'system',
+      content: [
+        'Context:',
+        `layoutMode=${state.layoutMode}`,
+        selected ? `selected=${selected.data.pluginId}` : 'selected=null',
+        'pipeline:',
+        pipelineSummary || '(empty)',
+      ].join('\n'),
+    }
+
+    try {
+      const recent = state.chat.messages.slice(-12)
+      const r = await requestAiChat([context, ...recent, { role: 'user', content }])
+      set((s) => ({
+        chatBusy: false,
+        chat: { messages: [...s.chat.messages, { role: 'assistant', content: r.message || '' }] },
+      }))
+    } catch (e: any) {
+      set((s) => ({
+        chatBusy: false,
+        bottomTab: 'errors',
+        errors: [...s.errors, `ChatError: ${String(e?.message ?? e)}`],
+        chat: {
+          messages: [
+            ...s.chat.messages,
+            {
+              role: 'assistant',
+              content:
+                'Chat is unavailable (check OPENAI_API_KEY + restart dev server). Falling back to mocked AI planning still works.',
+            },
+          ],
+        },
+      }))
     }
   },
 

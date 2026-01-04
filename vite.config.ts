@@ -12,6 +12,10 @@ type AiPlanRequest = {
   }[]
 }
 
+type AiChatRequest = {
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
+}
+
 function readJson(req: any): Promise<any> {
   return new Promise((resolve, reject) => {
     let raw = ''
@@ -146,6 +150,72 @@ export default defineConfig(({ mode }) => {
                       `[openai] model: ${OPENAI_MODEL}`,
                     ],
                     errors: [],
+                  }),
+                )
+                return
+              } catch (e: any) {
+                res.statusCode = 500
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Proxy error', details: String(e?.message ?? e) }))
+                return
+              }
+            }
+
+            if (req.method === 'POST' && req.url.startsWith('/api/ai/chat')) {
+              if (!OPENAI_API_KEY) {
+                res.statusCode = 503
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'OPENAI_API_KEY not set' }))
+                return
+              }
+
+              let body: AiChatRequest
+              try {
+                body = (await readJson(req)) as AiChatRequest
+              } catch {
+                res.statusCode = 400
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+                return
+              }
+
+              const system = [
+                'You are SAW Assistant: help the user build scientific pipelines, debug nodes, and explain outputs.',
+                'Be concise. Suggest concrete next actions in the UI when possible.',
+              ].join('\n')
+
+              const messages = Array.isArray(body.messages) ? body.messages : []
+              const finalMessages = [{ role: 'system', content: system }, ...messages]
+
+              try {
+                const r = await fetch('https://api.openai.com/v1/chat/completions', {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${OPENAI_API_KEY}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    model: OPENAI_MODEL,
+                    temperature: 0.3,
+                    messages: finalMessages,
+                  }),
+                })
+
+                if (!r.ok) {
+                  const t = await r.text()
+                  res.statusCode = 502
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ error: 'OpenAI request failed', details: t }))
+                  return
+                }
+
+                const j: any = await r.json()
+                const content: string | undefined = j?.choices?.[0]?.message?.content
+                res.setHeader('Content-Type', 'application/json')
+                res.end(
+                  JSON.stringify({
+                    message: content ?? '',
+                    model: OPENAI_MODEL,
                   }),
                 )
                 return

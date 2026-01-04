@@ -7,6 +7,7 @@ export function Inspector() {
   const selectedNodeId = useSawStore((s) => s.selectedNodeId)
   const node = useSawStore((s) => s.nodes.find((n) => n.id === selectedNodeId) ?? null)
   const updateNodeParam = useSawStore((s) => s.updateNodeParam)
+  const openFullscreen = useSawStore((s) => s.openFullscreen)
 
   if (!node) {
     return (
@@ -23,7 +24,18 @@ export function Inspector() {
   return (
     <Panel
       title="Inspector"
-      right={<span className="text-[11px] text-zinc-500">{plugin.name}</span>}
+      right={
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-zinc-500">{plugin.name}</span>
+          <button
+            type="button"
+            onClick={() => openFullscreen(node.id)}
+            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+          >
+            Fullscreen
+          </button>
+        </div>
+      }
       className="min-h-0 overflow-hidden"
     >
       <div className="min-h-0 overflow-auto p-3">

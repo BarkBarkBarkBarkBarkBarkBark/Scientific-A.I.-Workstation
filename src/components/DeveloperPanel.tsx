@@ -4,6 +4,99 @@ import { Panel } from './ui/Panel'
 import { sourceFiles } from '../dev/sourceFiles'
 import { useSawStore } from '../store/useSawStore'
 
+type TreeNode =
+  | { kind: 'dir'; name: string; path: string; children: TreeNode[] }
+  | { kind: 'file'; name: string; path: string }
+
+function buildTree(paths: string[]): TreeNode[] {
+  const root: { kind: 'dir'; name: string; path: string; children: TreeNode[] } = {
+    kind: 'dir',
+    name: '',
+    path: '',
+    children: [],
+  }
+
+  for (const p of paths) {
+    const parts = p.split('/').filter(Boolean)
+    let cur = root
+    let acc = ''
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]!
+      acc = acc ? `${acc}/${part}` : part
+      const isFile = i === parts.length - 1
+      if (isFile) {
+        cur.children.push({ kind: 'file', name: part, path: acc })
+      } else {
+        let next = cur.children.find(
+          (c): c is Extract<TreeNode, { kind: 'dir' }> => c.kind === 'dir' && c.name === part,
+        )
+        if (!next) {
+          next = { kind: 'dir', name: part, path: acc, children: [] }
+          cur.children.push(next)
+        }
+        cur = next
+      }
+    }
+  }
+
+  const sort = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+    for (const n of nodes) if (n.kind === 'dir') sort(n.children)
+  }
+  sort(root.children)
+  return root.children
+}
+
+function TreeView(props: {
+  nodes: TreeNode[]
+  selectedPath: string
+  onSelect: (path: string) => void
+}) {
+  return (
+    <div className="space-y-1">
+      {props.nodes.map((n) => {
+        if (n.kind === 'file') {
+          const active = n.path === props.selectedPath
+          return (
+            <button
+              key={n.path}
+              type="button"
+              onClick={() => props.onSelect(n.path)}
+              className={[
+                'w-full rounded-md border px-2 py-1.5 text-left text-xs font-mono transition',
+                active
+                  ? 'border-emerald-700 bg-emerald-900/20 text-zinc-100'
+                  : 'border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
+              ].join(' ')}
+              title={n.path}
+            >
+              {n.name}
+            </button>
+          )
+        }
+
+        return (
+          <details key={n.path} open className="rounded-md border border-zinc-800 bg-zinc-950/20">
+            <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-semibold text-zinc-300">
+              {n.name}/
+            </summary>
+            <div className="px-2 pb-2">
+              <TreeView
+                nodes={n.children}
+                selectedPath={props.selectedPath}
+                onSelect={props.onSelect}
+              />
+            </div>
+          </details>
+        )
+      })}
+    </div>
+  )
+}
+
 export function DeveloperPanel() {
   const [q, setQ] = useState('')
   const [selectedPath, setSelectedPath] = useState(sourceFiles[0]?.path ?? '')
@@ -17,6 +110,8 @@ export function DeveloperPanel() {
     if (!s) return sourceFiles
     return sourceFiles.filter((f) => f.path.toLowerCase().includes(s))
   }, [q])
+
+  const tree = useMemo(() => buildTree(filtered.map((f) => f.path)), [filtered])
 
   const aiStatus = useSawStore((s) => s.aiStatus)
   const refreshAiStatus = useSawStore((s) => s.refreshAiStatus)
@@ -35,23 +130,7 @@ export function DeveloperPanel() {
           </div>
 
           <div className="mt-2 min-h-0 flex-1 overflow-auto">
-            <div className="space-y-1">
-              {filtered.map((f) => (
-                <button
-                  key={f.path}
-                  type="button"
-                  onClick={() => setSelectedPath(f.path)}
-                  className={[
-                    'w-full rounded-md border px-2 py-1.5 text-left text-xs font-mono transition',
-                    f.path === selectedPath
-                      ? 'border-emerald-700 bg-emerald-900/20 text-zinc-100'
-                      : 'border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
-                  ].join(' ')}
-                >
-                  {f.path}
-                </button>
-              ))}
-            </div>
+            <TreeView nodes={tree} selectedPath={selectedPath} onSelect={setSelectedPath} />
           </div>
 
           <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-2 text-[11px] text-zinc-400">
@@ -83,7 +162,7 @@ export function DeveloperPanel() {
         <div className="h-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
           <Editor
             height="100%"
-            defaultLanguage="typescript"
+            defaultLanguage={selected?.path.endsWith('.md') ? 'markdown' : 'typescript'}
             theme="vs-dark"
             value={selected?.content ?? ''}
             options={{

@@ -51,6 +51,7 @@ export function PipelineBuilder() {
   const moveNodeInPipeline = useSawStore((s) => s.moveNodeInPipeline)
   const deleteNode = useSawStore((s) => s.deleteNode)
   const setNodeViewHeight = useSawStore((s) => s.setNodeViewHeight)
+  const openFullscreen = useSawStore((s) => s.openFullscreen)
 
   const [activeDropIndex, setActiveDropIndex] = useState<number | null>(null)
 
@@ -140,7 +141,19 @@ export function PipelineBuilder() {
         <div className="px-3 pt-3">
           <Panel
             title={activePlugin ? `Module View — ${activePlugin.name}` : 'Module View'}
-            right={<span className="text-[11px] text-zinc-500">wheel to zoom waveform • drag to pan</span>}
+            right={
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-zinc-500">wheel zoom • drag pan</span>
+                <button
+                  type="button"
+                  disabled={!activeNode}
+                  onClick={() => activeNode && openFullscreen(activeNode.id)}
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
+                >
+                  Fullscreen
+                </button>
+              </div>
+            }
             className="overflow-hidden"
           >
             <div className="overflow-auto p-3" style={{ height: activeHeight }}>

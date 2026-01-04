@@ -31,4 +31,20 @@ export async function requestAiPlan(goal: string, plugins: PluginDefinition[]): 
   return (await r.json()) as AiPlan
 }
 
+export type ChatRole = 'system' | 'user' | 'assistant'
+export type ChatMessage = { role: ChatRole; content: string }
+
+export async function requestAiChat(messages: ChatMessage[]) {
+  const r = await fetch('/api/ai/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
+  })
+  if (!r.ok) {
+    const t = await r.text()
+    throw new Error(`Chat request failed: ${t}`)
+  }
+  return (await r.json()) as { message: string; model: string }
+}
+
 

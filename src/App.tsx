@@ -5,10 +5,12 @@ import { Inspector } from './components/Inspector'
 import { BottomPanel } from './components/BottomPanel'
 import { GoalBox } from './components/GoalBox'
 import { CodeEditorModal } from './components/CodeEditorModal'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useSawStore } from './store/useSawStore'
 import { ResizableDivider } from './components/ui/ResizableDivider'
 import { PipelineBuilder } from './components/PipelineBuilder'
+import { ModuleFullscreenModal } from './components/ModuleFullscreenModal'
+import { ConsoleFullscreenModal } from './components/ConsoleFullscreenModal'
 
 export function App() {
   const refreshAiStatus = useSawStore((s) => s.refreshAiStatus)
@@ -16,10 +18,17 @@ export function App() {
   const setLayout = useSawStore((s) => s.setLayout)
   const layoutMode = useSawStore((s) => s.layoutMode)
   const deleteSelectedNode = useSawStore((s) => s.deleteSelectedNode)
+  const [vh, setVh] = useState(() => (typeof window === 'undefined' ? 900 : window.innerHeight))
 
   useEffect(() => {
     void refreshAiStatus()
   }, [refreshAiStatus])
+
+  useEffect(() => {
+    const onResize = () => setVh(window.innerHeight)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -40,9 +49,14 @@ export function App() {
 
   return (
     <div className="h-full bg-zinc-950 font-ui text-zinc-100">
+      {/*
+        Max bottom height is basically "almost full screen".
+        (Top bar + goal box + paddings leave ~160px.)
+      */}
+      {/**/}
       <div
         className="grid h-full gap-0"
-        style={{ gridTemplateRows: `48px auto 1fr 6px ${layout.bottomHeight}px` }}
+        style={{ gridTemplateRows: `48px auto 1fr 10px ${layout.bottomHeight}px` }}
       >
         <TopBar />
         <GoalBox />
@@ -82,13 +96,13 @@ export function App() {
           </div>
         </div>
 
-        <div className="mx-2 rounded-md border border-zinc-800 bg-zinc-950/40">
+        <div className="mx-2 rounded-md border border-zinc-800 bg-zinc-950/60">
           <ResizableDivider
             orientation="horizontal"
             value={layout.bottomHeight}
             setValue={(v) => setLayout({ bottomHeight: v })}
             min={160}
-            max={520}
+            max={Math.max(200, vh - 160)}
           />
         </div>
 
@@ -96,6 +110,8 @@ export function App() {
       </div>
 
       <CodeEditorModal />
+      <ModuleFullscreenModal />
+      <ConsoleFullscreenModal />
     </div>
   )
 }
