@@ -5,7 +5,7 @@ Desktop-style UI (Ableton-for-science vibe) to assemble pipelines from plugins, 
 ## Run
 
 ```bash
-cd "/Users/marco/Cursor_Folder/Cursor_Codespace/Scientific A.I. Workstation"
+cd "/Scientific A.I. Workstation"
 npm install
 npm run dev
 ```
