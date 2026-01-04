@@ -1,0 +1,80 @@
+import type { Node } from 'reactflow'
+
+export type Port = {
+  id: string
+  name: string
+  type: string
+}
+
+export type ParamKind = 'text' | 'number' | 'select'
+
+export type PluginParameterDefinition = {
+  id: string
+  label: string
+  kind: ParamKind
+  default: string | number
+  options?: string[]
+  min?: number
+  max?: number
+}
+
+export type PluginDefinition = {
+  id: string
+  name: string
+  version: string
+  description: string
+  inputs: Port[]
+  outputs: Port[]
+  parameters: PluginParameterDefinition[]
+}
+
+export type NodeStatus = 'idle' | 'running' | 'error'
+
+export type CodeIndex = {
+  classes: { name: string; methods: string[]; attributes: string[] }[]
+  functions: { name: string; signature: string }[]
+}
+
+export type GitPreview = {
+  base: string
+  current: string
+  diff: string
+  commitMessage: string
+}
+
+export type AudioRuntime = {
+  fileName: string | null
+  original: AudioBuffer | null
+  filtered: AudioBuffer | null
+  lastError: string | null
+}
+
+export type NodeUiRuntime = {
+  /**
+   * Height (px) of the module view area when this node is active in Pipeline layout.
+   */
+  viewHeight: number
+}
+
+export type PluginNodeData = {
+  pluginId: string
+  title: string
+  status: NodeStatus
+  params: Record<string, string | number>
+  /**
+   * handleId -> type
+   * ex: "in:df" -> "DataFrame"
+   */
+  portTypes: Record<string, string>
+  code: string
+  codeIndex: CodeIndex
+  git: GitPreview
+  runtime?: {
+    audio?: AudioRuntime
+    ui?: NodeUiRuntime
+  }
+}
+
+export type PluginNode = Node<PluginNodeData, 'pluginNode'>
+
+
