@@ -1,9 +1,10 @@
 import Editor from '@monaco-editor/react'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getPlugin } from '../mock/plugins'
 import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
 import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
+import { SourceViewer } from './SourceViewer'
 
 export function ModuleFullscreenModal() {
   const fullscreen = useSawStore((s) => s.fullscreen)
@@ -13,6 +14,7 @@ export function ModuleFullscreenModal() {
 
   const node = useSawStore((s) => s.nodes.find((n) => n.id === fullscreen.nodeId) ?? null)
   const plugin = useMemo(() => (node ? getPlugin(node.data.pluginId) : null), [node])
+  const [codeTab, setCodeTab] = useState<'source' | 'python'>('source')
 
   useEffect(() => {
     if (!fullscreen.open) return
@@ -61,24 +63,62 @@ export function ModuleFullscreenModal() {
             </Panel>
 
             <Panel title="Code" className="min-h-0 overflow-hidden">
-              <div className="h-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
-                <Editor
-                  height="100%"
-                  defaultLanguage="python"
-                  theme="vs-dark"
-                  value={node.data.code}
-                  onChange={(v) => {
-                    if (!editableMode) return
-                    updateNodeCode(node.id, v ?? '')
-                  }}
-                  options={{
-                    readOnly: !editableMode,
-                    fontSize: 13,
-                    minimap: { enabled: false },
-                    wordWrap: 'on',
-                    scrollBeyondLastLine: false,
-                  }}
-                />
+              <div className="flex h-full min-h-0 flex-col gap-2 p-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCodeTab('source')}
+                    className={[
+                      'rounded-md px-3 py-1.5 text-xs font-semibold transition',
+                      codeTab === 'source'
+                        ? 'bg-zinc-800 text-zinc-100'
+                        : 'bg-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
+                    ].join(' ')}
+                  >
+                    Source (TS)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCodeTab('python')}
+                    className={[
+                      'rounded-md px-3 py-1.5 text-xs font-semibold transition',
+                      codeTab === 'python'
+                        ? 'bg-zinc-800 text-zinc-100'
+                        : 'bg-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
+                    ].join(' ')}
+                  >
+                    Python (mock)
+                  </button>
+                  <div className="ml-auto text-[11px] text-zinc-500">
+                    {codeTab === 'python' ? (editableMode ? 'editable' : 'read-only') : 'read-only'}
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1">
+                  {codeTab === 'source' ? (
+                    <SourceViewer paths={plugin.sourcePaths ?? []} />
+                  ) : (
+                    <div className="h-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
+                      <Editor
+                        height="100%"
+                        defaultLanguage="python"
+                        theme="vs-dark"
+                        value={node.data.code}
+                        onChange={(v) => {
+                          if (!editableMode) return
+                          updateNodeCode(node.id, v ?? '')
+                        }}
+                        options={{
+                          readOnly: !editableMode,
+                          fontSize: 13,
+                          minimap: { enabled: false },
+                          wordWrap: 'on',
+                          scrollBeyondLastLine: false,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             </Panel>
           </div>

@@ -6,6 +6,12 @@ export const plugins: PluginDefinition[] = [
     name: 'Audio Lowpass',
     version: '0.1.0',
     description: 'Upload an MP3, apply a lowpass filter, and preview the waveform (real WebAudio).',
+    categoryPath: 'audio/processors',
+    sourcePaths: [
+      'src/components/inspector/AudioLowpassInspector.tsx',
+      'src/audio/webaudio.ts',
+      'src/components/audio/Waveform.tsx'
+    ],
     inputs: [],
     outputs: [{ id: 'audio', name: 'audio', type: 'Audio' }],
     parameters: [
@@ -17,6 +23,8 @@ export const plugins: PluginDefinition[] = [
     name: 'Load CSV',
     version: '1.0.0',
     description: 'Load a CSV file into a DataFrame (mocked).',
+    categoryPath: 'data/io',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [],
     outputs: [{ id: 'df', name: 'dataframe', type: 'DataFrame' }],
     parameters: [
@@ -29,6 +37,8 @@ export const plugins: PluginDefinition[] = [
     name: 'Filter Rows',
     version: '1.2.0',
     description: 'Filter rows by a boolean expression (mocked).',
+    categoryPath: 'data/processors',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [{ id: 'df_in', name: 'input', type: 'DataFrame' }],
     outputs: [{ id: 'df_out', name: 'filtered', type: 'DataFrame' }],
     parameters: [{ id: 'expr', label: 'Expression', kind: 'text', default: 'col("signal") > 0.5' }],
@@ -38,6 +48,8 @@ export const plugins: PluginDefinition[] = [
     name: 'Normalize',
     version: '0.9.1',
     description: 'Normalize numeric columns using z-score (mocked).',
+    categoryPath: 'data/processors',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [{ id: 'df', name: 'input', type: 'DataFrame' }],
     outputs: [{ id: 'df_norm', name: 'normalized', type: 'DataFrame' }],
     parameters: [
@@ -50,6 +62,8 @@ export const plugins: PluginDefinition[] = [
     name: 'PCA',
     version: '2.0.0',
     description: 'Dimensionality reduction (mocked).',
+    categoryPath: 'neural/processors',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [{ id: 'df', name: 'input', type: 'DataFrame' }],
     outputs: [{ id: 'emb', name: 'embedding', type: 'Embedding' }],
     parameters: [{ id: 'n_components', label: 'Components', kind: 'number', default: 2, min: 2, max: 64 }],
@@ -59,6 +73,8 @@ export const plugins: PluginDefinition[] = [
     name: 'Train Classifier',
     version: '0.3.0',
     description: 'Train a simple classifier on embeddings (mocked).',
+    categoryPath: 'neural/processors',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [
       { id: 'x', name: 'features', type: 'Embedding' },
       { id: 'y', name: 'labels', type: 'Labels' },
@@ -74,6 +90,8 @@ export const plugins: PluginDefinition[] = [
     name: 'Predict',
     version: '0.3.0',
     description: 'Run inference with a trained model (mocked).',
+    categoryPath: 'neural/processors',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [
       { id: 'model', name: 'model', type: 'Model' },
       { id: 'x', name: 'features', type: 'Embedding' },
@@ -86,6 +104,8 @@ export const plugins: PluginDefinition[] = [
     name: 'Plot Scatter',
     version: '1.1.0',
     description: 'Scatter plot (mocked UI-only).',
+    categoryPath: 'viz/processors',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [{ id: 'emb', name: 'points', type: 'Embedding' }],
     outputs: [{ id: 'viz', name: 'viz', type: 'Visualization' }],
     parameters: [
@@ -99,6 +119,8 @@ export const plugins: PluginDefinition[] = [
     name: 'Labels From Column',
     version: '0.1.0',
     description: 'Extract labels from a DataFrame column (mocked).',
+    categoryPath: 'data/io',
+    sourcePaths: ['src/mock/plugins.ts'],
     inputs: [{ id: 'df', name: 'input', type: 'DataFrame' }],
     outputs: [{ id: 'y', name: 'labels', type: 'Labels' }],
     parameters: [{ id: 'column', label: 'Column', kind: 'text', default: 'condition' }],

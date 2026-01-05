@@ -1,0 +1,23 @@
+{
+  "layout": {
+    "top": "TopBar (layout mode selector + editable toggle)",
+    "left": "PluginBrowser (collapsible + category tree + drag source)",
+    "center": {
+      "pipeline": "PipelineBuilder (tabs + module view + drop zones + reorder + remove + fullscreen)",
+      "graph": "NodeCanvas (ReactFlow)"
+    },
+    "right": "Inspector (params + code structure + audio inspector + fullscreen)",
+    "bottom": "BottomPanel (tabs + resizable height + fullscreen)"
+  },
+  "key_interactions": [
+    "drag plugin from PluginBrowser -> PipelineBuilder drop zone => add step",
+    "drag plugin from PluginBrowser -> NodeCanvas => create node",
+    "pipeline reorder => drag step box -> drop zone",
+    "delete => Remove button or Delete/Backspace when not typing",
+    "AudioLowpass => upload mp3 -> lowpass offline render -> waveforms; wheel zoom + drag pan",
+    "Module fullscreen => module UI + code; Esc closes",
+    "Console fullscreen => logs/errors/ai/chat/dev; Esc closes"
+  ]
+}
+
+

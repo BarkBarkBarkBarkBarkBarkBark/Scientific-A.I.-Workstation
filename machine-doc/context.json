@@ -1,0 +1,40 @@
+{
+  "id": "SAW",
+  "name": "Scientific AI Workstation",
+  "kind": "frontend_mvp",
+  "goal": "Desktop-style DAW UI for assembling scientific pipelines from plugins; inspect nodes; mock+wire AI planning/chat; mock code editing/diff; no real execution backend.",
+  "stack": {
+    "ui": ["react@18", "typescript", "vite@5", "tailwindcss@3"],
+    "graph": ["reactflow@11"],
+    "state": ["zustand@4"],
+    "editor": ["monaco (@monaco-editor/react)"]
+  },
+  "theme": {
+    "mode": "dark_default",
+    "style": "DAW-like spacing/typography, panels, splitters"
+  },
+  "runtime": {
+    "execution": "mocked",
+    "ai": "real via local dev proxy; fallback to mock planner",
+    "git": "mock diff; local git repo optional"
+  },
+  "entrypoints": {
+    "html": "index.html",
+    "app": "src/App.tsx",
+    "main": "src/main.tsx"
+  },
+  "modes": {
+    "layout": ["pipeline", "graph"],
+    "editableMode": "UI toggle; enables code editing in fullscreen/module editor"
+  },
+  "non_goals": ["no auth", "no filesystem access in browser", "no real execution engine", "no real git integration", "no backend server (dev proxy only)"],
+  "dev": {
+    "run": ["npm install", "npm run dev"],
+    "env": {
+      "OPENAI_API_KEY": "required for /api/ai/*; read by Vite dev server (NOT shipped to browser)",
+      "OPENAI_MODEL": "optional; default gpt-4o-mini"
+    }
+  }
+}
+
+

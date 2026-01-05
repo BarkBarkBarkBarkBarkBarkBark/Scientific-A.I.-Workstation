@@ -75,8 +75,8 @@ export function App() {
                 orientation="vertical"
                 value={layout.leftWidth}
                 setValue={(v) => setLayout({ leftWidth: v })}
-                min={220}
-                max={520}
+                min={layout.leftCollapsed ? 56 : 220}
+                max={layout.leftCollapsed ? 56 : 520}
               />
             </div>
 

@@ -1,0 +1,16 @@
+{
+  "source": "src/mock/plugins.ts",
+  "plugins": [
+    { "id": "audio_lowpass", "cat": "audio/processors", "io": { "in": [], "out": ["Audio"] } },
+    { "id": "load_csv", "cat": "data/io", "io": { "in": [], "out": ["DataFrame"] } },
+    { "id": "labels_from_column", "cat": "data/io", "io": { "in": ["DataFrame"], "out": ["Labels"] } },
+    { "id": "filter_rows", "cat": "data/processors", "io": { "in": ["DataFrame"], "out": ["DataFrame"] } },
+    { "id": "normalize", "cat": "data/processors", "io": { "in": ["DataFrame"], "out": ["DataFrame"] } },
+    { "id": "pca", "cat": "neural/processors", "io": { "in": ["DataFrame"], "out": ["Embedding"] } },
+    { "id": "train_classifier", "cat": "neural/processors", "io": { "in": ["Embedding", "Labels"], "out": ["Model"] } },
+    { "id": "predict", "cat": "neural/processors", "io": { "in": ["Model", "Embedding"], "out": ["Predictions"] } },
+    { "id": "plot_scatter", "cat": "viz/processors", "io": { "in": ["Embedding"], "out": ["Visualization"] } }
+  ]
+}
+
+

@@ -1,0 +1,37 @@
+{
+  "server": "vite-dev-middleware",
+  "auth": { "source": "process.env", "var": "OPENAI_API_KEY", "exposedToBrowser": false },
+  "modelVar": "OPENAI_MODEL",
+  "endpoints": [
+    {
+      "m": "GET",
+      "path": "/api/ai/status",
+      "out": { "enabled": "bool", "model": "string" }
+    },
+    {
+      "m": "POST",
+      "path": "/api/ai/plan",
+      "in": { "goal": "string", "plugins": "PluginLite[]" },
+      "out": {
+        "summary": "string",
+        "suggestedPlugins": "string[]",
+        "connections": "({fromPluginId:string,toPluginId:string})[]",
+        "suggestionsText": "string[]",
+        "logs": "string[]",
+        "errors": "string[]"
+      }
+    },
+    {
+      "m": "POST",
+      "path": "/api/ai/chat",
+      "in": { "messages": "({role:'system'|'user'|'assistant',content:string})[]" },
+      "out": { "message": "string", "model": "string" }
+    }
+  ],
+  "notes": [
+    "Used only for local dev; production would require real backend/proxy.",
+    "If key missing, UI falls back to mock planner; chat reports error."
+  ]
+}
+
+

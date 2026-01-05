@@ -23,6 +23,16 @@ export type PluginDefinition = {
   name: string
   version: string
   description: string
+  /**
+   * Directory-like grouping, intended to match eventual importable package paths.
+   * Example: "audio/processors" or "neural/processors"
+   */
+  categoryPath: string
+  /**
+   * Repo source files that implement this module's current frontend behavior.
+   * These paths are used for in-GUI "Source" viewing.
+   */
+  sourcePaths?: string[]
   inputs: Port[]
   outputs: Port[]
   parameters: PluginParameterDefinition[]

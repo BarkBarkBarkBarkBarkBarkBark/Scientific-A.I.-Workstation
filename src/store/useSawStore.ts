@@ -82,8 +82,15 @@ type SawState = {
   setNodeViewHeight: (nodeId: string, height: number) => void
 
   // Layout
-  layout: { leftWidth: number; rightWidth: number; bottomHeight: number }
+  layout: {
+    leftWidth: number
+    leftWidthOpen: number
+    leftCollapsed: boolean
+    rightWidth: number
+    bottomHeight: number
+  }
   setLayout: (patch: Partial<SawState['layout']>) => void
+  toggleLeftSidebar: () => void
 
   consoleFullscreen: boolean
   openConsoleFullscreen: () => void
@@ -180,7 +187,7 @@ export const useSawStore = create<SawState>((set, get) => ({
     ],
   },
   layoutMode: 'pipeline',
-  layout: { leftWidth: 280, rightWidth: 340, bottomHeight: 240 },
+  layout: { leftWidth: 280, leftWidthOpen: 280, leftCollapsed: false, rightWidth: 340, bottomHeight: 240 },
   consoleFullscreen: false,
 
   onNodesChange: (changes) => set({ nodes: applyNodeChanges(changes, get().nodes) as PluginNode[] }),
@@ -192,6 +199,27 @@ export const useSawStore = create<SawState>((set, get) => ({
   setGoalText: (goalText) => set({ goalText }),
   setLayoutMode: (layoutMode) => set({ layoutMode }),
   setLayout: (patch) => set((s) => ({ layout: { ...s.layout, ...patch } })),
+  toggleLeftSidebar: () => {
+    set((s) => {
+      if (s.layout.leftCollapsed) {
+        return {
+          layout: {
+            ...s.layout,
+            leftCollapsed: false,
+            leftWidth: s.layout.leftWidthOpen || 280,
+          },
+        }
+      }
+      return {
+        layout: {
+          ...s.layout,
+          leftCollapsed: true,
+          leftWidthOpen: s.layout.leftWidth,
+          leftWidth: 56,
+        },
+      }
+    })
+  },
   openConsoleFullscreen: () => set({ consoleFullscreen: true }),
   closeConsoleFullscreen: () => set({ consoleFullscreen: false }),
 

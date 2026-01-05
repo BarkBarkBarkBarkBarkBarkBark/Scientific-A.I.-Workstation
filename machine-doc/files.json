@@ -1,0 +1,27 @@
+{
+  "roles": [
+    { "p": "src/App.tsx", "r": "top-level layout; splitters; mounts modals; switches PipelineBuilder vs NodeCanvas" },
+    { "p": "src/store/useSawStore.ts", "r": "single Zustand store: nodes/edges/selection/layout/logs/errors/ai/chat/audio; pipeline operations" },
+    { "p": "src/mock/plugins.ts", "r": "plugin catalog (mock); includes categoryPath; used by browser + node creation" },
+    { "p": "src/mock/ai.ts", "r": "mock planner (fallback when OpenAI unavailable)" },
+    { "p": "src/ai/client.ts", "r": "frontend client for /api/ai/status /api/ai/plan /api/ai/chat" },
+    { "p": "vite.config.ts", "r": "Vite dev-server middleware: OpenAI proxy endpoints under /api/ai/*" },
+    { "p": "src/components/PluginBrowser.tsx", "r": "left sidebar; collapsible; grouped by categoryPath; drag source" },
+    { "p": "src/components/PipelineBuilder.tsx", "r": "pipeline mode UI: drop zones; reorder; remove; module tabs; per-module resizable view; fullscreen button" },
+    { "p": "src/components/NodeCanvas.tsx", "r": "graph mode UI (ReactFlow); drag plugins onto canvas; connect types" },
+    { "p": "src/components/Inspector.tsx", "r": "right sidebar inspector; params + mocked code structure; fullscreen button" },
+    { "p": "src/components/BottomPanel.tsx", "r": "console tabs (logs/errors/ai/chat/dev) + fullscreen button" },
+    { "p": "src/components/ConsoleFullscreenModal.tsx", "r": "fullscreen console overlay (tabs mirrored)" },
+    { "p": "src/components/ModuleFullscreenModal.tsx", "r": "fullscreen module overlay (module UI + Monaco code)" },
+    { "p": "src/components/CodeEditorModal.tsx", "r": "mock code editor modal + mock diff/commit preview" },
+    { "p": "src/components/ChatPanel.tsx", "r": "chat UI wired to store.sendChat()" },
+    { "p": "src/components/DeveloperPanel.tsx", "r": "Dev panel: Vite-indexed file browser; collapsible directory tree; Monaco viewer" },
+    { "p": "src/dev/sourceFiles.ts", "r": "Vite import.meta.glob raw source index (build-time) for Dev panel" },
+    { "p": "src/audio/webaudio.ts", "r": "real WebAudio: decode mp3; offline lowpass render; play buffer" },
+    { "p": "src/components/audio/Waveform.tsx", "r": "waveform renderer; wheel zoom + drag pan" },
+    { "p": "src/components/ui/Panel.tsx", "r": "panel shell; flex sizing for nested Monaco/scroll regions" },
+    { "p": "src/components/ui/ResizableDivider.tsx", "r": "splitters; vertical/horizontal pointer drag" }
+  ]
+}
+
+
