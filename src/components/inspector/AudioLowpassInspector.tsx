@@ -20,7 +20,7 @@ export function AudioLowpassInspector(props: { nodeId: string }) {
   return (
     <div className="space-y-3">
       <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
-        <div className="text-xs font-semibold tracking-wide text-zinc-200">MP3 Input</div>
+        <div className="text-xs font-semibold tracking-wide text-zinc-200">MP3</div>
         <div className="mt-2 flex items-center justify-between gap-2">
           <input
             type="file"

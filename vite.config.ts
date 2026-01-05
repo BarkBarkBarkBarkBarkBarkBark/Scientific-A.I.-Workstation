@@ -105,8 +105,9 @@ export default defineConfig(({ mode }) => {
 
               try {
                 await fs.writeFile(resolved.abs, String(body.content ?? ''), 'utf8')
-                // Vite will typically detect changes via FS watchers; this makes it explicit.
-                server.ws.send({ type: 'full-reload' })
+                // Trigger Vite's HMR pipeline without a full page reload (keeps app state).
+                // This updates only the modules impacted by the changed file.
+                server.watcher.emit('change', resolved.abs)
                 return json(res, 200, { ok: true })
               } catch (e: any) {
                 return json(res, 500, { error: 'write_failed', details: String(e?.message ?? e) })
@@ -115,9 +116,19 @@ export default defineConfig(({ mode }) => {
 
             if (req.method === 'GET' && req.url.startsWith('/api/dev/git/status')) {
               try {
+                const u = new URL(req.url, 'http://localhost')
+                const rel = u.searchParams.get('path') || ''
                 const s = await runGit(ROOT, ['status', '--porcelain'])
+
+                if (rel) {
+                  const resolved = safeResolve(ROOT, rel)
+                  if (!resolved.ok) return json(res, 400, { error: 'invalid_path', reason: resolved.reason })
+                  const d = await runGit(ROOT, ['diff', '--', rel])
+                  return json(res, 200, { status: s.stdout, diff: d.stdout, path: rel })
+                }
+
                 const d = await runGit(ROOT, ['diff'])
-                return json(res, 200, { status: s.stdout, diff: d.stdout })
+                return json(res, 200, { status: s.stdout, diff: d.stdout, path: null })
               } catch (e: any) {
                 return json(res, 500, { error: 'git_failed', details: String(e?.message ?? e) })
               }
