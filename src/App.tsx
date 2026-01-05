@@ -14,7 +14,16 @@ import { ConsoleFullscreenModal } from './components/ConsoleFullscreenModal'
 
 export function App() {
   const refreshAiStatus = useSawStore((s) => s.refreshAiStatus)
-  const layout = useSawStore((s) => s.layout)
+  const layout = useSawStore(
+    (s) =>
+      s.layout ?? {
+        leftWidth: 280,
+        leftWidthOpen: 280,
+        leftCollapsed: false,
+        rightWidth: 340,
+        bottomHeight: 240,
+      },
+  )
   const setLayout = useSawStore((s) => s.setLayout)
   const layoutMode = useSawStore((s) => s.layoutMode)
   const deleteSelectedNode = useSawStore((s) => s.deleteSelectedNode)

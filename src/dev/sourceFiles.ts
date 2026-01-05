@@ -5,6 +5,7 @@ export type SourceFile = { path: string; content: string }
 const modules = import.meta.glob(
   [
     '/src/**/*.{ts,tsx,css,md,json}',
+    '/machine-doc/**/*.{md,json}',
     '/README.md',
     '/ENV_SETUP.md',
     '/package.json',

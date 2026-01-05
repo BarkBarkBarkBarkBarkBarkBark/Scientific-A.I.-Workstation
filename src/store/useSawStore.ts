@@ -17,6 +17,7 @@ import { makeMockCode, makeMockCodeIndex, makeMockGitPreview } from '../mock/cod
 import { getAiStatus, requestAiChat, requestAiPlan, type ChatMessage } from '../ai/client'
 import type { AiStatus } from '../types/ai'
 import { decodeAudioFile, renderLowpass } from '../audio/webaudio'
+import { sourceFiles } from '../dev/sourceFiles'
 
 type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev'
 
@@ -49,6 +50,7 @@ type SawState = {
   layoutMode: LayoutMode
   chatBusy: boolean
   chat: { messages: ChatMessage[] }
+  dev: { attachedPaths: string[]; lastForbidden?: { op: string; path: string; patch?: string } | null }
 
   onNodesChange: (changes: NodeChange[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
@@ -75,6 +77,13 @@ type SawState = {
   refreshAiStatus: () => Promise<void>
   submitGoal: (goal: string) => Promise<void>
   sendChat: (text: string) => Promise<void>
+  devAttachPath: (path: string) => void
+  devDetachPath: (path: string) => void
+  devClearAttachments: () => void
+  applyPatch: (patch: string) => Promise<{ ok: boolean; error?: string }> 
+  commitAll: (message: string) => Promise<{ ok: boolean; error?: string }>
+  grantWriteCaps: (rulePath: string) => Promise<{ ok: boolean; error?: string }>
+  clearLastForbidden: () => void
 
   // Audio plugin (real WebAudio)
   loadMp3ToNode: (nodeId: string, file: File) => Promise<void>
@@ -149,7 +158,7 @@ function findFirstMatchingHandles(source: PluginNode, target: PluginNode) {
   return null
 }
 
-export const useSawStore = create<SawState>((set, get) => ({
+const _useSawStore = create<SawState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
@@ -186,6 +195,7 @@ export const useSawStore = create<SawState>((set, get) => ({
       },
     ],
   },
+  dev: { attachedPaths: [] },
   layoutMode: 'pipeline',
   layout: { leftWidth: 280, leftWidthOpen: 280, leftCollapsed: false, rightWidth: 340, bottomHeight: 240 },
   consoleFullscreen: false,
@@ -448,6 +458,126 @@ export const useSawStore = create<SawState>((set, get) => ({
     const selected = state.nodes.find((n) => n.id === state.selectedNodeId) ?? null
     const pipelineSummary = state.nodes.map((n, i) => `${i + 1}. ${n.data.pluginId}`).join('\n')
 
+    const lc = content.toLowerCase()
+    const cleaned = lc.replace(/[^a-z]/g, '')
+    const wantsFileList =
+      /what\s+f\w*iles?\s+can\s+you\s+see/i.test(lc) ||
+      /what\s+f\w*iles?\s+do\s+you\s+see/i.test(lc) ||
+      /can\s+you\s+see\s+any\s+f\w*iles?/i.test(lc) ||
+      /list\s+f\w*iles?/i.test(lc) ||
+      /show\s+f\w*iles?/i.test(lc) ||
+      cleaned.includes('whatfilescanyousee') ||
+      cleaned.includes('whatfilesdoyousee')
+    const wantsDocsList =
+      /what\s+docs\s+can\s+you\s+see/i.test(lc) ||
+      /what\s+documentation\s+can\s+you\s+see/i.test(lc) ||
+      /list\s+docs/i.test(lc) ||
+      /show\s+docs/i.test(lc) ||
+      cleaned.includes('whatdocscanyousee') ||
+      cleaned.includes('whatdocumentationcanyousee')
+
+    // Repo index (paths only) so chat can self-inspect at a high level.
+    // (Exclude huge dirs server-side; this is safe to include by default.)
+    let treeIndexRoot = ''
+    let treeIndexSrc = ''
+    let treeIndexSource = 'runtime'
+    try {
+      const toLines = async (root: string) => {
+        const r = await fetch(`/api/dev/tree?root=${encodeURIComponent(root)}&depth=3&max=2000`)
+        if (!r.ok) return ''
+        const j = (await r.json()) as any
+        const lines: string[] = []
+        const walk = (n: any) => {
+          if (!n) return
+          if (n.type === 'file') lines.push(n.path)
+          else if (n.type === 'dir') {
+            if (n.path) lines.push(n.path + '/')
+            for (const c of n.children ?? []) walk(c)
+          }
+        }
+        walk(j.tree)
+        return lines.slice(0, 600).join('\n')
+      }
+      treeIndexRoot = await toLines('.')
+      treeIndexSrc = await toLines('src')
+    } catch {
+      // ignore
+    }
+
+    if (!treeIndexRoot) {
+      // Fallback to bundled index (works even when dev FS endpoints are unavailable).
+      treeIndexSource = 'bundled'
+      const paths = sourceFiles.map((f) => f.path)
+      const uniq = Array.from(new Set(paths))
+      const lines = uniq.slice(0, 800)
+      treeIndexRoot = lines.slice(0, 600).join('\n')
+      treeIndexSrc = lines.filter((p) => p.startsWith('src/')).slice(0, 600).join('\n')
+    }
+
+    // Fast local answer for "what files/docs can you see?" so we don't depend on model behavior.
+    if (wantsFileList || wantsDocsList) {
+      const all = treeIndexRoot
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const listed = wantsDocsList
+        ? all.filter((p) => p.endsWith('.md') || p.endsWith('.json'))
+        : all
+      const snippet = listed.slice(0, 200).join('\n')
+      const header = wantsDocsList ? 'Docs visible:' : 'Files visible:'
+      set((s) => ({
+        chatBusy: false,
+        chat: {
+          messages: [
+            ...s.chat.messages,
+            {
+              role: 'assistant',
+              content:
+                `${header}\n\n` +
+                '```' +
+                '\n' +
+                snippet +
+                '\n' +
+                '```' +
+                `\n(source: ${treeIndexSource}${listed.length > 200 ? `, showing 200/${listed.length}` : ''})`,
+            },
+          ],
+        },
+      }))
+      return
+    }
+
+    // Attach file contents (dev-only; server enforces caps)
+    const attached = state.dev.attachedPaths.slice(0, 8)
+    const attachedBlocks: string[] = []
+    let budget = 60_000
+    for (const p of attached) {
+      if (budget <= 0) break
+      try {
+        const r = await fetch(`/api/dev/file?path=${encodeURIComponent(p)}`)
+        if (!r.ok) continue
+        const j = (await r.json()) as { content: string }
+        const c = String(j.content ?? '')
+        const slice = c.slice(0, Math.max(0, Math.min(c.length, budget)))
+        budget -= slice.length
+        attachedBlocks.push(`FILE:${p}\n---\n${slice}\n---\n`)
+      } catch {
+        // ignore
+      }
+    }
+
+    // Persistent session log tail (server-side)
+    let sessionTail = ''
+    try {
+      const r = await fetch('/api/dev/session/log?tail=200')
+      if (r.ok) {
+        const j = (await r.json()) as any
+        sessionTail = String(j.ndjson ?? '')
+      }
+    } catch {
+      // ignore
+    }
+
     const context: ChatMessage = {
       role: 'system',
       content: [
@@ -456,12 +586,37 @@ export const useSawStore = create<SawState>((set, get) => ({
         selected ? `selected=${selected.data.pluginId}` : 'selected=null',
         'pipeline:',
         pipelineSummary || '(empty)',
+        'recent_logs_tail:',
+        ...state.logs.slice(-30),
+        'recent_errors_tail:',
+        ...state.errors.slice(-30),
+        'recent_session_tail:',
+        sessionTail || '(unavailable)',
+        treeIndexRoot ? `repo_index_root:${treeIndexSource}` : 'repo_index_root:(unavailable)',
+        treeIndexRoot || '',
+        treeIndexSrc ? `repo_index_src:${treeIndexSource}` : 'repo_index_src:(unavailable)',
+        treeIndexSrc || '',
+        attachedBlocks.length ? 'attached_files:' : 'attached_files:(none)',
+        ...attachedBlocks,
       ].join('\n'),
     }
 
     try {
       const recent = state.chat.messages.slice(-12)
-      const r = await requestAiChat([context, ...recent, { role: 'user', content }])
+      // If user intent looks like an edit request, nudge the model to output a diff.
+      const editIntent =
+        /\b(edit|change|modify|add|remove|delete|rename|fix|refactor|commit|patch|create|make|write|append|new\s+file)\b/i.test(
+          content,
+        )
+      const userMsg: ChatMessage = editIntent
+        ? {
+            role: 'user',
+            content:
+              `PROPOSE_PATCH\nReturn ONLY a unified diff in a single \`\`\`diff\`\`\` block.\n\nRequest:\n${content}`,
+          }
+        : { role: 'user', content }
+
+      const r = await requestAiChat([context, ...recent, userMsg])
       set((s) => ({
         chatBusy: false,
         chat: { messages: [...s.chat.messages, { role: 'assistant', content: r.message || '' }] },
@@ -482,6 +637,154 @@ export const useSawStore = create<SawState>((set, get) => ({
           ],
         },
       }))
+    }
+  },
+
+  devAttachPath: (path) => {
+    const p = String(path || '').replaceAll('\\', '/')
+    if (!p) return
+    set((s) => {
+      if (s.dev.attachedPaths.includes(p)) return s
+      return { dev: { attachedPaths: [...s.dev.attachedPaths, p] } as any } as any
+    })
+  },
+
+  devDetachPath: (path) => {
+    const p = String(path || '').replaceAll('\\', '/')
+    set((s) => ({ dev: { attachedPaths: s.dev.attachedPaths.filter((x) => x !== p) } as any } as any))
+  },
+
+  devClearAttachments: () => set({ dev: { attachedPaths: [] } as any } as any),
+
+  grantWriteCaps: async (rulePath) => {
+    const p = String(rulePath || '').replaceAll('\\', '/').trim()
+    if (!p) return { ok: false, error: 'missing_path' }
+    try {
+      const r = await fetch('/api/dev/caps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: p, caps: { r: true, w: true, d: false } }),
+      })
+      if (!r.ok) {
+        const t = await r.text()
+        set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CapsError: ${t}`] }))
+        return { ok: false, error: t }
+      }
+      set((s) => ({
+        logs: [...s.logs, `[caps] enabled W for "${p}"`],
+        dev: { ...(s.dev as any), lastForbidden: null } as any,
+      }))
+      return { ok: true }
+    } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CapsError: ${msg}`] }))
+      return { ok: false, error: msg }
+    }
+  },
+
+  clearLastForbidden: () =>
+    set((s) => ({ dev: { ...(s.dev as any), lastForbidden: null } as any } as any)),
+
+  applyPatch: async (patch) => {
+    try {
+      let p = String(patch ?? '')
+      // Normalize to avoid invisible chars / missing newline causing git apply parsing issues.
+      p = p.replaceAll('\r\n', '\n')
+      p = p.replace(/[\u200B-\u200D\uFEFF]/g, '')
+      if (!p.endsWith('\n')) p += '\n'
+
+      const r = await fetch('/api/dev/safe/applyPatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: p }),
+      })
+      if (!r.ok) {
+        const t = await r.text()
+        set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `SafePatchError: ${t}`] }))
+        // Friendlier guidance when blocked by caps
+        try {
+          const j = JSON.parse(t) as any
+          if (j?.error === 'forbidden' && typeof j?.path === 'string') {
+            set((s) => ({
+              dev: { ...(s.dev as any), lastForbidden: { op: String(j?.op ?? ''), path: j.path, patch: p } } as any,
+            }))
+            set((s) => ({
+              chat: {
+                messages: [
+                  ...s.chat.messages,
+                  {
+                    role: 'assistant',
+                    content:
+                      `Blocked by capabilities (write disabled).\n\n` +
+                      `Path: ${j.path}\n\n` +
+                      `Fix: Console → Dev → Capabilities.\n` +
+                      `- Set Rule path to "${j.path}" (or "." to allow root)\n` +
+                      `- Enable W\n` +
+                      `- Retry Apply patch`,
+                  },
+                ],
+              },
+            }))
+          }
+        } catch {
+          // ignore
+        }
+        set((s) => ({
+          chat: {
+            messages: [
+              ...s.chat.messages,
+              { role: 'assistant', content: `Apply patch failed:\n${t}` },
+            ],
+          },
+        }))
+        return { ok: false, error: t }
+      }
+      set((s) => ({ logs: [...s.logs, '[safe] patch applied'] }))
+      return { ok: true }
+    } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `SafePatchError: ${msg}`] }))
+      set((s) => ({
+        chat: {
+          messages: [
+            ...s.chat.messages,
+            { role: 'assistant', content: `Apply patch failed:\n${msg}` },
+          ],
+        },
+      }))
+      return { ok: false, error: msg }
+    }
+  },
+
+  commitAll: async (message) => {
+    try {
+      const msg = String(message ?? '').trim()
+      if (!msg) return { ok: false, error: 'missing_commit_message' }
+      const r = await fetch('/api/dev/git/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      })
+      if (!r.ok) {
+        const t = await r.text()
+        set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CommitError: ${t}`] }))
+        set((s) => ({
+          chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${t}` }] },
+        }))
+        return { ok: false, error: t }
+      }
+      set((s) => ({ logs: [...s.logs, `[git] committed: ${msg}`] }))
+      set((s) => ({
+        chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Committed:\n${msg}` }] },
+      }))
+      return { ok: true }
+    } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CommitError: ${msg}`] }))
+      set((s) => ({
+        chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${msg}` }] },
+      }))
+      return { ok: false, error: msg }
     }
   },
 
@@ -688,5 +991,52 @@ export const useSawStore = create<SawState>((set, get) => ({
     }
   },
 }))
+
+// Preserve app state across Vite HMR updates while still picking up NEW actions/state fields.
+// Strategy: if an old store exists, migrate its state into the newly created store,
+// then replace the global pointer with the new store.
+const STORE_KEY = '__SAW_ZUSTAND_STORE__'
+const existingStore = (globalThis as any)[STORE_KEY] as any
+if (existingStore?.getState) {
+  const prev = existingStore.getState() as any
+  // Merge previous state onto fresh defaults so newly-added fields exist.
+  _useSawStore.setState({ ..._useSawStore.getState(), ...prev } as any, true)
+}
+export const useSawStore: typeof _useSawStore = _useSawStore;
+(globalThis as any)[STORE_KEY] = useSawStore;
+
+// Persist a small subset across full page reloads (commit/HMR edge cases).
+try {
+  const KEY = '__SAW_PERSIST__'
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const raw = window.localStorage.getItem(KEY)
+    if (raw) {
+      const j = JSON.parse(raw) as any
+      const cur = useSawStore.getState() as any
+      // IMPORTANT: merge into the existing store state (do NOT replace), otherwise we can wipe required fields like `layout`.
+      useSawStore.setState({
+        chat: j.chat ?? cur.chat,
+        dev: { ...(cur.dev ?? {}), ...(j.dev ?? {}) },
+        logs: j.logs ?? cur.logs,
+        errors: j.errors ?? cur.errors,
+        bottomTab: j.bottomTab ?? cur.bottomTab,
+      } as any)
+    }
+    useSawStore.subscribe((s) => {
+      window.localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          chat: { messages: (s.chat?.messages ?? []).slice(-60) },
+          dev: { attachedPaths: s.dev?.attachedPaths ?? [] },
+          logs: (s.logs ?? []).slice(-120),
+          errors: (s.errors ?? []).slice(-120),
+          bottomTab: s.bottomTab,
+        }),
+      )
+    })
+  }
+} catch {
+  // ignore
+}
 
 

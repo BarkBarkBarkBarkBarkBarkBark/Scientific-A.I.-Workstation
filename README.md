@@ -69,4 +69,3 @@ The browser calls a local dev proxy (`/api/ai/*`) so the API key is **not expose
 
 See `ENV_SETUP.md`.
 
-

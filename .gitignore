@@ -4,6 +4,7 @@ dist
 .vite
 .env
 .env.*
+.saw
 .npm-cache
 *.tsbuildinfo
 npm-debug.log*
