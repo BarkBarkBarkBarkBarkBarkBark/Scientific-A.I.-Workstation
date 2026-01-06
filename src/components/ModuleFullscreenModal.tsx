@@ -1,19 +1,24 @@
 import Editor from '@monaco-editor/react'
 import { useEffect, useMemo, useState } from 'react'
-import { getPlugin } from '../mock/plugins'
 import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
 import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
 import { SourceViewer } from './SourceViewer'
+import { IngestDirectoryModule } from './modules/IngestDirectoryModule'
+import { ReadOnlyFileViewer } from './ReadOnlyFileViewer'
 
 export function ModuleFullscreenModal() {
   const fullscreen = useSawStore((s) => s.fullscreen)
   const closeFullscreen = useSawStore((s) => s.closeFullscreen)
   const editableMode = useSawStore((s) => s.editableMode)
   const updateNodeCode = useSawStore((s) => s.updateNodeCode)
+  const pluginCatalog = useSawStore((s) => s.pluginCatalog)
 
   const node = useSawStore((s) => s.nodes.find((n) => n.id === fullscreen.nodeId) ?? null)
-  const plugin = useMemo(() => (node ? getPlugin(node.data.pluginId) : null), [node])
+  const plugin = useMemo(
+    () => (node ? pluginCatalog.find((p) => p.id === node.data.pluginId) ?? null : null),
+    [node, pluginCatalog],
+  )
   const [codeTab, setCodeTab] = useState<'source' | 'python'>('source')
 
   useEffect(() => {
@@ -26,6 +31,10 @@ export function ModuleFullscreenModal() {
   }, [fullscreen.open, closeFullscreen])
 
   if (!fullscreen.open || !node || !plugin) return null
+
+  const manifestPath = (plugin.sourcePaths ?? []).find((p) => p.endsWith('/plugin.yaml') || p.endsWith('/plugin.yml')) ?? ''
+  const wrapperPath = (plugin.sourcePaths ?? []).find((p) => p.endsWith('/wrapper.py')) ?? ''
+  const isWorkspacePlugin = Boolean(manifestPath && wrapperPath)
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/70 p-4">
@@ -53,6 +62,8 @@ export function ModuleFullscreenModal() {
               <div className="h-full overflow-auto p-3">
                 {plugin.id === 'audio_lowpass' ? (
                   <AudioLowpassInspector nodeId={node.id} />
+                ) : plugin.id === 'saw.ingest.directory' ? (
+                  <IngestDirectoryModule />
                 ) : (
                   <div className="space-y-2">
                     <div className="text-sm text-zinc-200">{plugin.description}</div>
@@ -75,7 +86,7 @@ export function ModuleFullscreenModal() {
                         : 'bg-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
                     ].join(' ')}
                   >
-                    Source (TS)
+                    {isWorkspacePlugin ? 'Manifest (YAML)' : 'Source (TS)'}
                   </button>
                   <button
                     type="button"
@@ -87,15 +98,21 @@ export function ModuleFullscreenModal() {
                         : 'bg-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
                     ].join(' ')}
                   >
-                    Python (mock)
+                    {isWorkspacePlugin ? 'Wrapper (Python)' : 'Python (mock)'}
                   </button>
                   <div className="ml-auto text-[11px] text-zinc-500">
-                    {codeTab === 'python' ? (editableMode ? 'editable' : 'read-only') : 'read-only'}
+                    {isWorkspacePlugin ? 'read-only' : codeTab === 'python' ? (editableMode ? 'editable' : 'read-only') : 'read-only'}
                   </div>
                 </div>
 
                 <div className="min-h-0 flex-1">
-                  {codeTab === 'source' ? (
+                  {isWorkspacePlugin ? (
+                    codeTab === 'source' ? (
+                      <ReadOnlyFileViewer path={manifestPath} />
+                    ) : (
+                      <ReadOnlyFileViewer path={wrapperPath} />
+                    )
+                  ) : codeTab === 'source' ? (
                     <SourceViewer paths={plugin.sourcePaths ?? []} />
                   ) : (
                     <div className="h-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">

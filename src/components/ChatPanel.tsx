@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
+import { parsePatchProposalFromAssistant } from '../patching/parsePatchProposal'
 
 function normalizeNewFileShorthand(text: string): string | null {
   // Accept a very small shorthand to keep the UX robust when the model slips.
@@ -55,6 +56,7 @@ export function ChatPanel() {
   const devClearAttachments = useSawStore((s) => s.devClearAttachments)
   const applyPatch = useSawStore((s) => s.applyPatch)
   const commitAll = useSawStore((s) => s.commitAll)
+  const openPatchReviewFromMessage = useSawStore((s) => s.openPatchReviewFromMessage)
   const lastForbidden = useSawStore((s) => s.dev.lastForbidden ?? null)
   const grantWriteCaps = useSawStore((s) => s.grantWriteCaps)
   const clearLastForbidden = useSawStore((s) => s.clearLastForbidden)
@@ -163,8 +165,17 @@ export function ChatPanel() {
                 {m.role === 'user' ? 'You' : 'SAW'}
               </div>
               <div className="whitespace-pre-wrap text-sm leading-relaxed">{m.content}</div>
-              {m.role === 'assistant' && extractDiff(m.content) && (
+              {m.role === 'assistant' && parsePatchProposalFromAssistant(m.content).ok && (
                 <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => openPatchReviewFromMessage(m.content)}
+                    className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
+                    title="Review per-file diffs before applying"
+                  >
+                    Review patch
+                  </button>
                   <button
                     type="button"
                     disabled={busy}
@@ -238,7 +249,9 @@ export function ChatPanel() {
             )
           const wrapped =
             patchMode && editIntent
-              ? `PROPOSE_PATCH\nReturn ONLY a unified diff (git style) in a single \`\`\`diff\`\`\` block.\n\nRequest:\n${msg}`
+              ? `PROPOSE_PATCH\nReturn ONLY ONE of:\n` +
+                `A) a single JSON object matching PatchProposal (preferred), where each files[i].diff is a git-compatible unified diff for that file; OR\n` +
+                `B) a unified diff in a single \`\`\`diff\`\`\` block (fallback).\n\nRequest:\n${msg}`
               : msg
           await sendChat(wrapped)
         }}

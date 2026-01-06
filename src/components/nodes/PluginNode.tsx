@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from 'reactflow'
+import { useMemo } from 'react'
 import type { PluginNodeData } from '../../types/saw'
-import { getPlugin } from '../../mock/plugins'
+import { useSawStore } from '../../store/useSawStore'
 
 function statusColor(status: PluginNodeData['status']) {
   if (status === 'running') return 'bg-sky-500'
@@ -9,14 +10,15 @@ function statusColor(status: PluginNodeData['status']) {
 }
 
 export function PluginNode(props: NodeProps<PluginNodeData>) {
-  const p = getPlugin(props.data.pluginId)
+  const catalog = useSawStore((s) => s.pluginCatalog)
+  const p = useMemo(() => catalog.find((x) => x.id === props.data.pluginId) ?? null, [catalog, props.data.pluginId])
 
   return (
     <div className="w-[240px] rounded-lg border border-zinc-700 bg-zinc-950/70 shadow-sm">
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-zinc-100">{props.data.title}</div>
-          <div className="text-[11px] text-zinc-500">{p.id}</div>
+          <div className="text-[11px] text-zinc-500">{p?.id ?? props.data.pluginId}</div>
         </div>
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${statusColor(props.data.status)}`} />
@@ -27,8 +29,8 @@ export function PluginNode(props: NodeProps<PluginNodeData>) {
       <div className="grid grid-cols-2 gap-2 px-3 py-2 text-[11px]">
         <div className="space-y-1">
           <div className="text-zinc-500">Inputs</div>
-          {p.inputs.length === 0 && <div className="text-zinc-600">—</div>}
-          {p.inputs.map((input, idx) => {
+          {!p || p.inputs.length === 0 ? <div className="text-zinc-600">—</div> : null}
+          {(p?.inputs ?? []).map((input, idx) => {
             const handleId = `in:${input.id}`
             return (
               <div key={input.id} className="relative flex items-center justify-between gap-2">
@@ -54,8 +56,8 @@ export function PluginNode(props: NodeProps<PluginNodeData>) {
 
         <div className="space-y-1">
           <div className="text-zinc-500 text-right">Outputs</div>
-          {p.outputs.length === 0 && <div className="text-zinc-600 text-right">—</div>}
-          {p.outputs.map((output, idx) => {
+          {!p || p.outputs.length === 0 ? <div className="text-zinc-600 text-right">—</div> : null}
+          {(p?.outputs ?? []).map((output, idx) => {
             const handleId = `out:${output.id}`
             return (
               <div key={output.id} className="relative flex items-center justify-between gap-2">

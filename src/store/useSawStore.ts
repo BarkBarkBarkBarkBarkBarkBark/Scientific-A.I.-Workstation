@@ -11,13 +11,17 @@ import {
   type XYPosition,
 } from 'reactflow'
 import type { PluginNode, PluginNodeData } from '../types/saw'
-import { plugins, getPlugin } from '../mock/plugins'
+import type { PluginDefinition } from '../types/saw'
+import { plugins as builtinPlugins } from '../mock/plugins'
 import { generateAiPlan } from '../mock/ai'
 import { makeMockCode, makeMockCodeIndex, makeMockGitPreview } from '../mock/codegen'
 import { getAiStatus, requestAiChat, requestAiPlan, type ChatMessage } from '../ai/client'
 import type { AiStatus } from '../types/ai'
 import { decodeAudioFile, renderLowpass } from '../audio/webaudio'
 import { sourceFiles } from '../dev/sourceFiles'
+import type { PatchProposal } from '../types/patch'
+import { parsePatchProposalFromAssistant } from '../patching/parsePatchProposal'
+import { fetchWorkspacePlugins } from '../plugins/workspace'
 
 type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev'
 
@@ -44,6 +48,7 @@ type SawState = {
   goalText: string
   logs: string[]
   errors: string[]
+  errorLog: Array<{ ts: number; tag: string; text: string }>
   aiMessages: string[]
   aiBusy: boolean
   aiStatus: AiStatus | null
@@ -51,12 +56,17 @@ type SawState = {
   chatBusy: boolean
   chat: { messages: ChatMessage[] }
   dev: { attachedPaths: string[]; lastForbidden?: { op: string; path: string; patch?: string } | null }
+  patchReview: { open: boolean; busy: boolean; proposal: PatchProposal | null; lastError?: string }
+  workspacePlugins: PluginDefinition[]
+  pluginCatalog: PluginDefinition[]
+  refreshWorkspacePlugins: () => Promise<void>
 
   onNodesChange: (changes: NodeChange[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
   setSelectedNodeId: (id: string | null) => void
   setEditableMode: (enabled: boolean) => void
   setBottomTab: (tab: BottomTab) => void
+  clearErrors: () => void
   setGoalText: (text: string) => void
   setLayoutMode: (mode: LayoutMode) => void
 
@@ -84,6 +94,9 @@ type SawState = {
   commitAll: (message: string) => Promise<{ ok: boolean; error?: string }>
   grantWriteCaps: (rulePath: string) => Promise<{ ok: boolean; error?: string }>
   clearLastForbidden: () => void
+  openPatchReviewFromMessage: (assistantText: string) => void
+  closePatchReview: () => void
+  applyPatchProposal: (opts?: { commit?: boolean; commitMessage?: string }) => Promise<{ ok: boolean; error?: string }>
 
   // Audio plugin (real WebAudio)
   loadMp3ToNode: (nodeId: string, file: File) => Promise<void>
@@ -110,8 +123,33 @@ function id(prefix = 'n') {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`
 }
 
-function makeNodeData(pluginId: string): PluginNodeData {
-  const p = getPlugin(pluginId)
+function mergeCatalog(workspace: PluginDefinition[]) {
+  const byId = new Map<string, PluginDefinition>()
+  for (const p of builtinPlugins) byId.set(p.id, p)
+  for (const p of workspace) byId.set(p.id, p)
+  return Array.from(byId.values())
+}
+
+function getPluginFromCatalog(catalog: PluginDefinition[], pluginId: string): PluginDefinition | null {
+  return catalog.find((p) => p.id === pluginId) ?? null
+}
+
+function makeNodeData(catalog: PluginDefinition[], pluginId: string): PluginNodeData {
+  const p = getPluginFromCatalog(catalog, pluginId)
+  if (!p) {
+    // Fallback stub so UI doesn't crash; node will show unknown plugin id.
+    return {
+      pluginId,
+      title: pluginId,
+      status: 'error',
+      params: {},
+      portTypes: {},
+      code: `# Unknown plugin: ${pluginId}`,
+      codeIndex: { classes: [], functions: [] },
+      git: { base: '', current: '', diff: '', commitMessage: 'SAW: apply patch' },
+      runtime: { ui: { viewHeight: 220 } },
+    }
+  }
   const params: Record<string, string | number> = {}
   for (const def of p.parameters) params[def.id] = def.default
 
@@ -180,6 +218,7 @@ const _useSawStore = create<SawState>((set, get) => ({
     '    df = load_csv(path="data/missing.csv")',
     'FileNotFoundError: [Errno 2] No such file or directory: data/missing.csv',
   ],
+  errorLog: [],
   aiMessages: [
     'AI: Drop a "Load CSV" → "Normalize" → "PCA" chain to quickly sanity-check a dataset.',
   ],
@@ -196,6 +235,18 @@ const _useSawStore = create<SawState>((set, get) => ({
     ],
   },
   dev: { attachedPaths: [] },
+  patchReview: { open: false, busy: false, proposal: null, lastError: '' },
+  workspacePlugins: [],
+  pluginCatalog: mergeCatalog([]),
+  refreshWorkspacePlugins: async () => {
+    try {
+      const ws = await fetchWorkspacePlugins()
+      set({ workspacePlugins: ws, pluginCatalog: mergeCatalog(ws), logs: [...get().logs, `[plugins] loaded workspace plugins (${ws.length})`] })
+    } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      set((s) => ({ logs: [...s.logs, `[plugins] workspace fetch failed: ${msg}`] }))
+    }
+  },
   layoutMode: 'pipeline',
   layout: { leftWidth: 280, leftWidthOpen: 280, leftCollapsed: false, rightWidth: 340, bottomHeight: 240 },
   consoleFullscreen: false,
@@ -206,6 +257,7 @@ const _useSawStore = create<SawState>((set, get) => ({
   setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
   setEditableMode: (editableMode) => set({ editableMode }),
   setBottomTab: (bottomTab) => set({ bottomTab }),
+  clearErrors: () => set((s) => ({ errors: [], logs: [...s.logs, '[console] errors cleared'] })),
   setGoalText: (goalText) => set({ goalText }),
   setLayoutMode: (layoutMode) => set({ layoutMode }),
   setLayout: (patch) => set((s) => ({ layout: { ...s.layout, ...patch } })),
@@ -235,31 +287,31 @@ const _useSawStore = create<SawState>((set, get) => ({
 
   addNodeFromPlugin: (pluginId, position) => {
     const nodeId = id('node')
-    const p = getPlugin(pluginId)
+    const p = getPluginFromCatalog(get().pluginCatalog, pluginId)
     const node: PluginNode = {
       id: nodeId,
       type: 'pluginNode',
       position,
-      data: makeNodeData(pluginId),
+      data: makeNodeData(get().pluginCatalog, pluginId),
       draggable: true,
       selectable: true,
     }
     set((s) => ({
       nodes: [...s.nodes, node],
-      logs: [...s.logs, `[graph] added node "${p.name}"`],
+      logs: [...s.logs, `[graph] added node "${p?.name ?? pluginId}"`],
     }))
     return nodeId
   },
 
   addNodeFromPluginAtIndex: (pluginId, index) => {
     const nodeId = id('node')
-    const p = getPlugin(pluginId)
+    const p = getPluginFromCatalog(get().pluginCatalog, pluginId)
     // position is temporary; `reflowPipeline()` will set final positions
     const node: PluginNode = {
       id: nodeId,
       type: 'pluginNode',
       position: { x: 80, y: 80 },
-      data: makeNodeData(pluginId),
+      data: makeNodeData(get().pluginCatalog, pluginId),
       draggable: true,
       selectable: true,
     }
@@ -269,7 +321,7 @@ const _useSawStore = create<SawState>((set, get) => ({
       const nextNodes = [...s.nodes.slice(0, i), node, ...s.nodes.slice(i)]
       return {
         nodes: nextNodes,
-        logs: [...s.logs, `[graph] added node "${p.name}"`],
+        logs: [...s.logs, `[graph] added node "${p?.name ?? pluginId}"`],
       }
     })
 
@@ -551,8 +603,43 @@ const _useSawStore = create<SawState>((set, get) => ({
     const attached = state.dev.attachedPaths.slice(0, 8)
     const attachedBlocks: string[] = []
     let budget = 60_000
+
+    // Auto-attach: if the user mentions a file that exists in the repo index, include it.
+    // This prevents "patch does not apply" from blind edits where the model never saw real contents.
+    const repoPaths = new Set(
+      treeIndexRoot
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .filter((p) => !p.endsWith('/')),
+    )
+    const mentioned = new Set<string>()
+    const candidates = content.match(/[A-Za-z0-9_.\\/\-]+\.(tsx|ts|md|json|css|cjs|txt)/g) ?? []
+    for (const c of candidates) {
+      const p = c.replaceAll('\\', '/').replace(/^\.?\//, '')
+      if (repoPaths.has(p)) mentioned.add(p)
+      if (!p.includes('/')) {
+        for (const rp of repoPaths) if (rp === p || rp.endsWith(`/${p}`)) mentioned.add(rp)
+      }
+    }
     for (const p of attached) {
       if (budget <= 0) break
+      try {
+        const r = await fetch(`/api/dev/file?path=${encodeURIComponent(p)}`)
+        if (!r.ok) continue
+        const j = (await r.json()) as { content: string }
+        const c = String(j.content ?? '')
+        const slice = c.slice(0, Math.max(0, Math.min(c.length, budget)))
+        budget -= slice.length
+        attachedBlocks.push(`FILE:${p}\n---\n${slice}\n---\n`)
+      } catch {
+        // ignore
+      }
+    }
+
+    for (const p of Array.from(mentioned)) {
+      if (budget <= 0) break
+      if (attached.includes(p)) continue
       try {
         const r = await fetch(`/api/dev/file?path=${encodeURIComponent(p)}`)
         if (!r.ok) continue
@@ -589,7 +676,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         'recent_logs_tail:',
         ...state.logs.slice(-30),
         'recent_errors_tail:',
-        ...state.errors.slice(-30),
+        ...state.errorLog.slice(-30).map((e) => `[${new Date(e.ts).toLocaleTimeString()}] ${e.tag}: ${e.text}`),
         'recent_session_tail:',
         sessionTail || '(unavailable)',
         treeIndexRoot ? `repo_index_root:${treeIndexSource}` : 'repo_index_root:(unavailable)',
@@ -603,7 +690,7 @@ const _useSawStore = create<SawState>((set, get) => ({
 
     try {
       const recent = state.chat.messages.slice(-12)
-      // If user intent looks like an edit request, nudge the model to output a diff.
+      // If user intent looks like an edit request, nudge the model to output a PatchProposal JSON (diff fallback allowed).
       const editIntent =
         /\b(edit|change|modify|add|remove|delete|rename|fix|refactor|commit|patch|create|make|write|append|new\s+file)\b/i.test(
           content,
@@ -612,7 +699,9 @@ const _useSawStore = create<SawState>((set, get) => ({
         ? {
             role: 'user',
             content:
-              `PROPOSE_PATCH\nReturn ONLY a unified diff in a single \`\`\`diff\`\`\` block.\n\nRequest:\n${content}`,
+              `PROPOSE_PATCH\nReturn ONLY ONE of:\n` +
+              `A) a single JSON object matching PatchProposal (preferred), where each files[i].diff is a git-compatible unified diff for that file; OR\n` +
+              `B) a unified diff in a single \`\`\`diff\`\`\` block (fallback).\n\nRequest:\n${content}`,
           }
         : { role: 'user', content }
 
@@ -626,6 +715,10 @@ const _useSawStore = create<SawState>((set, get) => ({
         chatBusy: false,
         bottomTab: 'errors',
         errors: [...s.errors, `ChatError: ${String(e?.message ?? e)}`],
+        errorLog: [
+          ...s.errorLog,
+          { ts: Date.now(), tag: 'chat', text: `ChatError: ${String(e?.message ?? e)}` },
+        ],
         chat: {
           messages: [
             ...s.chat.messages,
@@ -656,6 +749,53 @@ const _useSawStore = create<SawState>((set, get) => ({
 
   devClearAttachments: () => set({ dev: { attachedPaths: [] } as any } as any),
 
+  openPatchReviewFromMessage: (assistantText) => {
+    const parsed = parsePatchProposalFromAssistant(String(assistantText ?? ''))
+    if (!parsed.ok) {
+      set((s) => ({
+        patchReview: { ...s.patchReview, lastError: `PatchProposal parse failed: ${parsed.error}` },
+      }))
+      return
+    }
+    set({
+      patchReview: { open: true, busy: false, proposal: parsed.proposal, lastError: '' },
+      bottomTab: 'chat',
+    })
+  },
+
+  closePatchReview: () => set({ patchReview: { open: false, busy: false, proposal: null, lastError: '' } }),
+
+  applyPatchProposal: async (opts) => {
+    const pr = get().patchReview
+    const proposal = pr.proposal
+    if (!proposal) return { ok: false, error: 'missing_proposal' }
+
+    const patch = proposal.files
+      .map((f) => String(f.diff ?? '').trim())
+      .filter(Boolean)
+      .map((d) => (d.endsWith('\n') ? d : d + '\n'))
+      .join('\n')
+
+    set((s) => ({ patchReview: { ...s.patchReview, busy: true, lastError: '' } }))
+    const r = await get().applyPatch(patch)
+    if (!r.ok) {
+      set((s) => ({ patchReview: { ...s.patchReview, busy: false, lastError: r.error ?? 'apply_failed' } }))
+      return r
+    }
+
+    if (opts?.commit) {
+      const msg = String(opts?.commitMessage ?? `SAW: ${proposal.summary || 'apply patch'}`).trim() || 'SAW: apply patch'
+      const cr = await get().commitAll(msg)
+      if (!cr.ok) {
+        set((s) => ({ patchReview: { ...s.patchReview, busy: false, lastError: cr.error ?? 'commit_failed' } }))
+        return cr
+      }
+    }
+
+    set((s) => ({ patchReview: { ...s.patchReview, busy: false, open: false, proposal: null, lastError: '' } }))
+    return { ok: true }
+  },
+
   grantWriteCaps: async (rulePath) => {
     const p = String(rulePath || '').replaceAll('\\', '/').trim()
     if (!p) return { ok: false, error: 'missing_path' }
@@ -667,7 +807,11 @@ const _useSawStore = create<SawState>((set, get) => ({
       })
       if (!r.ok) {
         const t = await r.text()
-        set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CapsError: ${t}`] }))
+        set((s) => ({
+          bottomTab: 'errors',
+          errors: [...s.errors, `CapsError: ${t}`],
+          errorLog: [...s.errorLog, { ts: Date.now(), tag: 'caps', text: `CapsError: ${t}` }],
+        }))
         return { ok: false, error: t }
       }
       set((s) => ({
@@ -677,7 +821,11 @@ const _useSawStore = create<SawState>((set, get) => ({
       return { ok: true }
     } catch (e: any) {
       const msg = String(e?.message ?? e)
-      set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CapsError: ${msg}`] }))
+      set((s) => ({
+        bottomTab: 'errors',
+        errors: [...s.errors, `CapsError: ${msg}`],
+        errorLog: [...s.errorLog, { ts: Date.now(), tag: 'caps', text: `CapsError: ${msg}` }],
+      }))
       return { ok: false, error: msg }
     }
   },
@@ -700,7 +848,11 @@ const _useSawStore = create<SawState>((set, get) => ({
       })
       if (!r.ok) {
         const t = await r.text()
-        set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `SafePatchError: ${t}`] }))
+        set((s) => ({
+          bottomTab: 'errors',
+          errors: [...s.errors, `SafePatchError: ${t}`],
+          errorLog: [...s.errorLog, { ts: Date.now(), tag: 'safePatch', text: `SafePatchError: ${t}` }],
+        }))
         // Friendlier guidance when blocked by caps
         try {
           const j = JSON.parse(t) as any
@@ -743,7 +895,11 @@ const _useSawStore = create<SawState>((set, get) => ({
       return { ok: true }
     } catch (e: any) {
       const msg = String(e?.message ?? e)
-      set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `SafePatchError: ${msg}`] }))
+      set((s) => ({
+        bottomTab: 'errors',
+        errors: [...s.errors, `SafePatchError: ${msg}`],
+        errorLog: [...s.errorLog, { ts: Date.now(), tag: 'safePatch', text: `SafePatchError: ${msg}` }],
+      }))
       set((s) => ({
         chat: {
           messages: [
@@ -767,7 +923,11 @@ const _useSawStore = create<SawState>((set, get) => ({
       })
       if (!r.ok) {
         const t = await r.text()
-        set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CommitError: ${t}`] }))
+        set((s) => ({
+          bottomTab: 'errors',
+          errors: [...s.errors, `CommitError: ${t}`],
+          errorLog: [...s.errorLog, { ts: Date.now(), tag: 'git', text: `CommitError: ${t}` }],
+        }))
         set((s) => ({
           chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${t}` }] },
         }))
@@ -780,7 +940,11 @@ const _useSawStore = create<SawState>((set, get) => ({
       return { ok: true }
     } catch (e: any) {
       const msg = String(e?.message ?? e)
-      set((s) => ({ bottomTab: 'errors', errors: [...s.errors, `CommitError: ${msg}`] }))
+      set((s) => ({
+        bottomTab: 'errors',
+        errors: [...s.errors, `CommitError: ${msg}`],
+        errorLog: [...s.errorLog, { ts: Date.now(), tag: 'git', text: `CommitError: ${msg}` }],
+      }))
       set((s) => ({
         chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${msg}` }] },
       }))
@@ -817,13 +981,13 @@ const _useSawStore = create<SawState>((set, get) => ({
 
     let plan = null as any
     try {
-      plan = await requestAiPlan(goal, plugins)
+      plan = await requestAiPlan(goal, get().pluginCatalog)
       set((s) => ({
         aiStatus: s.aiStatus ?? { enabled: true, model: 'openai' },
         logs: [...s.logs, ...plan.logs],
       }))
     } catch (e: any) {
-      const fallback = generateAiPlan(goal, plugins)
+      const fallback = generateAiPlan(goal, get().pluginCatalog)
       plan = fallback
       set((s) => ({
         bottomTab: 'ai',
@@ -835,6 +999,10 @@ const _useSawStore = create<SawState>((set, get) => ({
 
     set((s) => ({
       errors: [...s.errors, ...(plan?.errors ?? [])],
+      errorLog: [
+        ...s.errorLog,
+        ...(plan?.errors ?? []).map((t: string) => ({ ts: Date.now(), tag: 'aiPlan', text: String(t) })),
+      ],
       aiMessages: [
         ...s.aiMessages,
         `AI Plan:\n${plan.summary}`,
@@ -848,7 +1016,7 @@ const _useSawStore = create<SawState>((set, get) => ({
 
     if (get().layoutMode === 'pipeline') {
       for (const pluginId of suggested) {
-        if (!plugins.find((p) => p.id === pluginId)) continue
+        if (!get().pluginCatalog.find((p) => p.id === pluginId)) continue
         get().addNodeFromPluginAtIndex(pluginId, get().nodes.length)
       }
       get().reflowPipeline()
@@ -859,7 +1027,7 @@ const _useSawStore = create<SawState>((set, get) => ({
     const base = { x: 120, y: 140 }
     const spacing = 280
     for (const [i, pluginId] of suggested.entries()) {
-      if (!plugins.find((p) => p.id === pluginId)) continue
+      if (!get().pluginCatalog.find((p) => p.id === pluginId)) continue
       get().addNodeFromPlugin(pluginId, { x: base.x + i * spacing, y: base.y })
     }
   },
@@ -922,6 +1090,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         }),
         bottomTab: 'errors',
         errors: [...s.errors, `AudioDecodeError: ${String(e?.message ?? e)}`],
+        errorLog: [...s.errorLog, { ts: Date.now(), tag: 'audio', text: `AudioDecodeError: ${String(e?.message ?? e)}` }],
       }))
     }
   },
@@ -987,6 +1156,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         }),
         bottomTab: 'errors',
         errors: [...s.errors, `AudioRenderError: ${String(e?.message ?? e)}`],
+        errorLog: [...s.errorLog, { ts: Date.now(), tag: 'audio', text: `AudioRenderError: ${String(e?.message ?? e)}` }],
       }))
     }
   },
@@ -1019,6 +1189,7 @@ try {
         dev: { ...(cur.dev ?? {}), ...(j.dev ?? {}) },
         logs: j.logs ?? cur.logs,
         errors: j.errors ?? cur.errors,
+        errorLog: j.errorLog ?? cur.errorLog,
         bottomTab: j.bottomTab ?? cur.bottomTab,
       } as any)
     }
@@ -1030,6 +1201,7 @@ try {
           dev: { attachedPaths: s.dev?.attachedPaths ?? [] },
           logs: (s.logs ?? []).slice(-120),
           errors: (s.errors ?? []).slice(-120),
+          errorLog: (s.errorLog ?? []).slice(-200),
           bottomTab: s.bottomTab,
         }),
       )

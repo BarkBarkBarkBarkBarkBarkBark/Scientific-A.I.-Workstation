@@ -1,6 +1,5 @@
 import { Panel } from './ui/Panel'
 import { useSawStore } from '../store/useSawStore'
-import { getPlugin } from '../mock/plugins'
 import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
 
 export function Inspector() {
@@ -8,6 +7,7 @@ export function Inspector() {
   const node = useSawStore((s) => s.nodes.find((n) => n.id === selectedNodeId) ?? null)
   const updateNodeParam = useSawStore((s) => s.updateNodeParam)
   const openFullscreen = useSawStore((s) => s.openFullscreen)
+  const pluginCatalog = useSawStore((s) => s.pluginCatalog)
 
   if (!node) {
     return (
@@ -19,7 +19,14 @@ export function Inspector() {
     )
   }
 
-  const plugin = getPlugin(node.data.pluginId)
+  const plugin = pluginCatalog.find((p) => p.id === node.data.pluginId)
+  if (!plugin) {
+    return (
+      <Panel title="Inspector" className="min-h-0 overflow-hidden">
+        <div className="p-4 text-sm text-zinc-400">Unknown plugin: {node.data.pluginId}</div>
+      </Panel>
+    )
+  }
 
   return (
     <Panel

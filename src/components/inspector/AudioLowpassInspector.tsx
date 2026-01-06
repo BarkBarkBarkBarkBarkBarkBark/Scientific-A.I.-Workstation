@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { getPlugin } from '../../mock/plugins'
 import { useSawStore } from '../../store/useSawStore'
 import { Waveform } from '../audio/Waveform'
 import { playBuffer } from '../../audio/webaudio'
@@ -8,10 +7,14 @@ export function AudioLowpassInspector(props: { nodeId: string }) {
   const node = useSawStore((s) => s.nodes.find((n) => n.id === props.nodeId) ?? null)
   const loadMp3ToNode = useSawStore((s) => s.loadMp3ToNode)
   const updateNodeParam = useSawStore((s) => s.updateNodeParam)
+  const pluginCatalog = useSawStore((s) => s.pluginCatalog)
 
   const [stopper, setStopper] = useState<null | (() => void)>(null)
 
-  const plugin = useMemo(() => (node ? getPlugin(node.data.pluginId) : null), [node])
+  const plugin = useMemo(
+    () => (node ? pluginCatalog.find((p) => p.id === node.data.pluginId) ?? null : null),
+    [node, pluginCatalog],
+  )
   if (!node || !plugin) return null
 
   const audio = node.data.runtime?.audio

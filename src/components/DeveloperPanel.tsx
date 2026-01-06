@@ -55,7 +55,7 @@ function TreeView(props: {
   nodes: TreeNode[]
   selectedPath: string
   onSelect: (path: string) => void
-  renderFileRight?: (path: string) => JSX.Element | null
+  renderRight?: (path: string) => JSX.Element | null
 }) {
   return (
     <div className="space-y-1">
@@ -83,7 +83,7 @@ function TreeView(props: {
               >
                 {n.name}
               </button>
-              {props.renderFileRight ? props.renderFileRight(n.path) : null}
+              {props.renderRight ? props.renderRight(n.path) : null}
             </div>
           )
         }
@@ -91,13 +91,17 @@ function TreeView(props: {
         return (
           <details key={n.path} open className="rounded-md border border-zinc-800 bg-zinc-950/20">
             <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-semibold text-zinc-300">
-              {n.name}/
+              <div className="flex items-center justify-between gap-2">
+                <div className="truncate">{n.name}/</div>
+                {props.renderRight ? props.renderRight(n.path ? n.path + '/' : '.') : null}
+              </div>
             </summary>
             <div className="px-2 pb-2">
               <TreeView
                 nodes={n.children}
                 selectedPath={props.selectedPath}
                 onSelect={props.onSelect}
+                renderRight={props.renderRight}
               />
             </div>
           </details>
@@ -115,6 +119,9 @@ export function DeveloperPanel() {
   const [fileContent, setFileContent] = useState<string>('')
   const [caps, setCaps] = useState<CapsManifest | null>(null)
   const [capsPath, setCapsPath] = useState<string>(sourceFiles[0]?.path ?? '')
+  const [flags, setFlags] = useState<{ SAW_ENABLE_PATCH_ENGINE: boolean; SAW_ENABLE_DB: boolean; SAW_ENABLE_PLUGINS: boolean } | null>(null)
+  const [dbHealth, setDbHealth] = useState<string>('')
+  const [pluginsList, setPluginsList] = useState<string>('')
 
   const selected = useMemo(() => {
     return sourceFiles.find((f) => f.path === selectedPath) ?? sourceFiles[0]
@@ -157,6 +164,49 @@ export function DeveloperPanel() {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch('/api/dev/flags')
+        if (!r.ok) throw new Error(await r.text())
+        const j = (await r.json()) as any
+        setFlags({
+          SAW_ENABLE_PATCH_ENGINE: Boolean(j?.SAW_ENABLE_PATCH_ENGINE),
+          SAW_ENABLE_DB: Boolean(j?.SAW_ENABLE_DB),
+          SAW_ENABLE_PLUGINS: Boolean(j?.SAW_ENABLE_PLUGINS),
+        })
+      } catch {
+        setFlags(null)
+      }
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (!flags?.SAW_ENABLE_DB) return
+    void (async () => {
+      try {
+        const r = await fetch('http://127.0.0.1:5127/health')
+        if (!r.ok) throw new Error(await r.text())
+        setDbHealth(JSON.stringify(await r.json(), null, 2))
+      } catch (e: any) {
+        setDbHealth(String(e?.message ?? e))
+      }
+    })()
+  }, [flags?.SAW_ENABLE_DB])
+
+  useEffect(() => {
+    if (!flags?.SAW_ENABLE_PLUGINS) return
+    void (async () => {
+      try {
+        const r = await fetch('http://127.0.0.1:5127/plugins/list')
+        if (!r.ok) throw new Error(await r.text())
+        setPluginsList(JSON.stringify(await r.json(), null, 2))
+      } catch (e: any) {
+        setPluginsList(String(e?.message ?? e))
+      }
+    })()
+  }, [flags?.SAW_ENABLE_PLUGINS])
 
   useEffect(() => {
     void (async () => {
@@ -240,7 +290,7 @@ export function DeveloperPanel() {
                 nodes={runtimeTreeNodes}
                 selectedPath={selectedPath}
                 onSelect={setSelectedPath}
-                renderFileRight={renderCapsInline}
+                renderRight={renderCapsInline}
               />
             ) : (
               <>
@@ -357,6 +407,44 @@ export function DeveloperPanel() {
             <div className="mt-1 text-zinc-500">
               set <span className="font-mono text-zinc-300">OPENAI_API_KEY</span> then restart dev
             </div>
+          </div>
+
+          <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-2 text-[11px] text-zinc-400">
+            <div className="font-semibold text-zinc-300">Local services</div>
+            <div className="mt-1 text-zinc-500">
+              flags:{' '}
+              <span className="font-mono text-zinc-300">
+                {flags ? JSON.stringify(flags) : '(unavailable)'}
+              </span>
+            </div>
+            {flags?.SAW_ENABLE_DB ? (
+              <details className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/30 p-2">
+                <summary className="cursor-pointer select-none text-[11px] font-semibold text-zinc-300">
+                  DB health (127.0.0.1:5127)
+                </summary>
+                <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
+                  {dbHealth || '(loading)'}
+                </pre>
+              </details>
+            ) : (
+              <div className="mt-2 text-zinc-500">
+                DB: disabled (set <span className="font-mono text-zinc-300">SAW_ENABLE_DB=1</span> before <span className="font-mono text-zinc-300">npm run dev</span>)
+              </div>
+            )}
+            {flags?.SAW_ENABLE_PLUGINS ? (
+              <details className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/30 p-2">
+                <summary className="cursor-pointer select-none text-[11px] font-semibold text-zinc-300">
+                  Plugins list
+                </summary>
+                <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
+                  {pluginsList || '(loading)'}
+                </pre>
+              </details>
+            ) : (
+              <div className="mt-1 text-zinc-500">
+                Plugins: disabled (set <span className="font-mono text-zinc-300">SAW_ENABLE_PLUGINS=1</span> before <span className="font-mono text-zinc-300">npm run dev</span>)
+              </div>
+            )}
           </div>
         </div>
       </Panel>

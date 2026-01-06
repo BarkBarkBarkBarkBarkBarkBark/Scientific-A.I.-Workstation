@@ -1,9 +1,9 @@
 import { useMemo, useState, type DragEvent } from 'react'
 import { Panel } from './ui/Panel'
 import { useSawStore } from '../store/useSawStore'
-import { getPlugin } from '../mock/plugins'
 import { ResizableDivider } from './ui/ResizableDivider'
 import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
+import { IngestDirectoryModule } from './modules/IngestDirectoryModule'
 
 function DropZone(props: {
   index: number
@@ -52,6 +52,7 @@ export function PipelineBuilder() {
   const deleteNode = useSawStore((s) => s.deleteNode)
   const setNodeViewHeight = useSawStore((s) => s.setNodeViewHeight)
   const openFullscreen = useSawStore((s) => s.openFullscreen)
+  const pluginCatalog = useSawStore((s) => s.pluginCatalog)
 
   const [activeDropIndex, setActiveDropIndex] = useState<number | null>(null)
 
@@ -84,7 +85,7 @@ export function PipelineBuilder() {
   }
 
   const activeNode = pipeline.find((n) => n.id === selectedNodeId) ?? null
-  const activePlugin = activeNode ? getPlugin(activeNode.data.pluginId) : null
+  const activePlugin = activeNode ? pluginCatalog.find((p) => p.id === activeNode.data.pluginId) ?? null : null
   const activeHeight = activeNode?.data.runtime?.ui?.viewHeight ?? 240
 
   return (
@@ -100,7 +101,7 @@ export function PipelineBuilder() {
             <div className="px-2 text-xs text-zinc-500">No modules yet</div>
           ) : (
             pipeline.map((n, idx) => {
-              const p = getPlugin(n.data.pluginId)
+              const p = pluginCatalog.find((pp) => pp.id === n.data.pluginId) ?? null
               const active = n.id === selectedNodeId
               return (
                 <div
@@ -121,7 +122,7 @@ export function PipelineBuilder() {
                     ].join(' ')}
                     title="Select module"
                   >
-                    {idx + 1}. {p.name}
+                    {idx + 1}. {p?.name ?? n.data.pluginId}
                   </button>
                   <button
                     type="button"
@@ -163,6 +164,8 @@ export function PipelineBuilder() {
                 </div>
               ) : activePlugin.id === 'audio_lowpass' ? (
                 <AudioLowpassInspector nodeId={activeNode.id} />
+              ) : activePlugin.id === 'saw.ingest.directory' ? (
+                <IngestDirectoryModule />
               ) : (
                 <div className="space-y-2">
                   <div className="text-sm text-zinc-200">{activePlugin.description}</div>
@@ -212,7 +215,7 @@ export function PipelineBuilder() {
           />
 
           {pipeline.map((n, idx) => {
-            const p = getPlugin(n.data.pluginId)
+            const p = pluginCatalog.find((pp) => pp.id === n.data.pluginId) ?? null
             const selected = selectedNodeId === n.id
             return (
               <div key={n.id} className="space-y-2">
@@ -237,9 +240,9 @@ export function PipelineBuilder() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-zinc-100">{p.name}</div>
+                      <div className="truncate text-sm font-semibold text-zinc-100">{p?.name ?? n.data.pluginId}</div>
                       <div className="mt-0.5 text-[11px] text-zinc-500">
-                        {p.id} • v{p.version}
+                        {p?.id ?? n.data.pluginId} • v{p?.version ?? '—'}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

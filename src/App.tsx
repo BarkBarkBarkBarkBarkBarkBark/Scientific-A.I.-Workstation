@@ -11,9 +11,11 @@ import { ResizableDivider } from './components/ui/ResizableDivider'
 import { PipelineBuilder } from './components/PipelineBuilder'
 import { ModuleFullscreenModal } from './components/ModuleFullscreenModal'
 import { ConsoleFullscreenModal } from './components/ConsoleFullscreenModal'
+import { PatchReviewModal } from './components/PatchReviewModal'
 
 export function App() {
   const refreshAiStatus = useSawStore((s) => s.refreshAiStatus)
+  const refreshWorkspacePlugins = useSawStore((s) => s.refreshWorkspacePlugins)
   const layout = useSawStore(
     (s) =>
       s.layout ?? {
@@ -31,7 +33,8 @@ export function App() {
 
   useEffect(() => {
     void refreshAiStatus()
-  }, [refreshAiStatus])
+    void refreshWorkspacePlugins()
+  }, [refreshAiStatus, refreshWorkspacePlugins])
 
   useEffect(() => {
     const onResize = () => setVh(window.innerHeight)
@@ -121,6 +124,7 @@ export function App() {
       <CodeEditorModal />
       <ModuleFullscreenModal />
       <ConsoleFullscreenModal />
+      <PatchReviewModal />
     </div>
   )
 }

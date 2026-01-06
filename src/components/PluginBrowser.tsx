@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { plugins } from '../mock/plugins'
 import { Panel } from './ui/Panel'
 import { useSawStore } from '../store/useSawStore'
 
@@ -7,18 +6,21 @@ export function PluginBrowser() {
   const [q, setQ] = useState('')
   const layout = useSawStore((s) => s.layout)
   const toggleLeftSidebar = useSawStore((s) => s.toggleLeftSidebar)
+  const catalog = useSawStore((s) => s.pluginCatalog)
+  const workspacePlugins = useSawStore((s) => s.workspacePlugins)
+  const refreshWorkspacePlugins = useSawStore((s) => s.refreshWorkspacePlugins)
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
-    if (!s) return plugins
-    return plugins.filter((p) => {
+    if (!s) return catalog
+    return catalog.filter((p) => {
       return (
         p.name.toLowerCase().includes(s) ||
         p.description.toLowerCase().includes(s) ||
         p.id.toLowerCase().includes(s)
       )
     })
-  }, [q])
+  }, [q, catalog])
 
   type CatNode =
     | { kind: 'dir'; name: string; path: string; children: CatNode[] }
@@ -145,17 +147,37 @@ export function PluginBrowser() {
     <Panel
       title="Plugin Browser"
       right={
-        <button
-          type="button"
-          onClick={toggleLeftSidebar}
-          className={[
-            'rounded-md border border-zinc-700 bg-zinc-950 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900',
-            layout.leftCollapsed ? 'px-2 py-1' : 'px-2 py-1',
-          ].join(' ')}
-          aria-label={layout.leftCollapsed ? 'Expand plugin browser' : 'Collapse plugin browser'}
-        >
-          {layout.leftCollapsed ? '⟩' : 'Collapse'}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="text-[11px] text-zinc-500">
+            ws:{' '}
+            <span className="font-mono text-zinc-300">
+              {workspacePlugins.length}
+            </span>{' '}
+            total:{' '}
+            <span className="font-mono text-zinc-300">
+              {catalog.length}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshWorkspacePlugins()}
+            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+            title="Re-fetch workspace plugins from SAW API (/plugins/list)"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={toggleLeftSidebar}
+            className={[
+              'rounded-md border border-zinc-700 bg-zinc-950 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900',
+              layout.leftCollapsed ? 'px-2 py-1' : 'px-2 py-1',
+            ].join(' ')}
+            aria-label={layout.leftCollapsed ? 'Expand plugin browser' : 'Collapse plugin browser'}
+          >
+            {layout.leftCollapsed ? '⟩' : 'Collapse'}
+          </button>
+        </div>
       }
       className="min-h-0 overflow-hidden"
     >

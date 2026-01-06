@@ -42,11 +42,37 @@ function readJson(req: any): Promise<any> {
 function json(res: any, statusCode: number, body: any) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json')
+  res.setHeader('Access-Control-Allow-Origin', '*')
   res.end(JSON.stringify(body))
 }
 
 type CapsRule = { path: string; r: boolean; w: boolean; d: boolean }
 type CapsManifest = { version: 1; updatedAt: number; rules: CapsRule[] }
+
+function parseAllowlist(envValue: any, fallback: string[]) {
+  const raw = String(envValue ?? '').trim()
+  if (!raw) return fallback
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => s.replaceAll('\\', '/'))
+}
+
+function isAllowedByPrefixes(relPath: string, allowlist: string[]) {
+  const p = relPath.replaceAll('\\', '/')
+  for (const prefix of allowlist) {
+    const pr = prefix.replaceAll('\\', '/')
+    if (pr === '.' || pr === './') return true
+    if (pr.endsWith('/')) {
+      if (p.startsWith(pr)) return true
+      continue
+    }
+    if (p === pr) return true
+    if (p.startsWith(pr + '/')) return true
+  }
+  return false
+}
 
 function safeResolve(root: string, relPath: string): { ok: true; abs: string } | { ok: false; reason: string } {
   const p = String(relPath || '').replaceAll('\\', '/')
@@ -138,7 +164,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const OPENAI_API_KEY = env.OPENAI_API_KEY
   const OPENAI_MODEL = env.OPENAI_MODEL || 'gpt-4o-mini'
+  const SAW_API_URL = env.SAW_API_URL || 'http://127.0.0.1:5127'
   const ROOT = process.cwd()
+  const PATCH_APPLY_ALLOWLIST = parseAllowlist(env.SAW_PATCH_APPLY_ALLOWLIST, ['saw-workspace/'])
   const SAW_DIR = path.join(ROOT, '.saw')
   const CAPS_PATH = path.join(SAW_DIR, 'caps.json')
   const SESSION_LOG = path.join(SAW_DIR, 'session.ndjson')
@@ -328,6 +356,85 @@ export default defineConfig(({ mode }) => {
             if (!req.url) return next()
 
             // -----------------------
+            // SAW API passthrough (same-origin helpers)
+            // -----------------------
+            if (req.method === 'GET' && req.url.startsWith('/api/saw/plugins/list')) {
+              try {
+                const r = await fetch(`${SAW_API_URL.replace(/\/$/, '')}/plugins/list`)
+                const body = await r.text()
+                res.statusCode = r.status
+                res.setHeader('Content-Type', 'application/json')
+                res.setHeader('Access-Control-Allow-Origin', '*')
+                res.end(body)
+                return
+              } catch (e: any) {
+                return json(res, 502, { error: 'saw_api_unavailable', details: String(e?.message ?? e) })
+              }
+            }
+
+            if (req.method === 'GET' && req.url.startsWith('/api/saw/health')) {
+              try {
+                const r = await fetch(`${SAW_API_URL.replace(/\/$/, '')}/health`)
+                const body = await r.text()
+                res.statusCode = r.status
+                res.setHeader('Content-Type', 'application/json')
+                res.setHeader('Access-Control-Allow-Origin', '*')
+                res.end(body)
+                return
+              } catch (e: any) {
+                return json(res, 502, { error: 'saw_api_unavailable', details: String(e?.message ?? e) })
+              }
+            }
+
+            if (req.method === 'POST' && req.url.startsWith('/api/saw/plugins/execute')) {
+              let body: any
+              try {
+                body = await readJson(req)
+              } catch {
+                return json(res, 400, { error: 'Invalid JSON body' })
+              }
+              try {
+                const r = await fetch(`${SAW_API_URL.replace(/\/$/, '')}/plugins/execute`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(body ?? {}),
+                })
+                const t = await r.text()
+                res.statusCode = r.status
+                res.setHeader('Content-Type', 'application/json')
+                res.setHeader('Access-Control-Allow-Origin', '*')
+                res.end(t)
+                return
+              } catch (e: any) {
+                return json(res, 502, { error: 'saw_api_unavailable', details: String(e?.message ?? e) })
+              }
+            }
+
+            if (req.method === 'POST' && req.url.startsWith('/api/saw/search/vector')) {
+              let body: any
+              try {
+                body = await readJson(req)
+              } catch {
+                return json(res, 400, { error: 'Invalid JSON body' })
+              }
+              try {
+                const r = await fetch(`${SAW_API_URL.replace(/\/$/, '')}/search/vector`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(body ?? {}),
+                })
+                const t = await r.text()
+                res.statusCode = r.status
+                res.setHeader('Content-Type', 'application/json')
+                res.setHeader('Access-Control-Allow-Origin', '*')
+                res.end(t)
+                return
+              } catch (e: any) {
+                return json(res, 502, { error: 'saw_api_unavailable', details: String(e?.message ?? e) })
+              }
+            }
+
+            // -----------------------
             // Dev FS + Git endpoints
             // -----------------------
             if (req.method === 'GET' && req.url.startsWith('/api/dev/caps')) {
@@ -367,6 +474,20 @@ export default defineConfig(({ mode }) => {
               const tail = Math.max(10, Math.min(2000, Number(u.searchParams.get('tail') || 200)))
               const ndjson = await readSessionTail(tail)
               return json(res, 200, { tail, ndjson })
+            }
+
+            if (req.method === 'GET' && req.url.startsWith('/api/dev/flags')) {
+              const u = new URL(req.url, 'http://localhost')
+              void u
+              const enable = (v: any) => {
+                const s = String(v ?? '').toLowerCase().trim()
+                return s === '1' || s === 'true' || s === 'yes' || s === 'on'
+              }
+              return json(res, 200, {
+                SAW_ENABLE_PATCH_ENGINE: enable(env.SAW_ENABLE_PATCH_ENGINE),
+                SAW_ENABLE_DB: enable(env.SAW_ENABLE_DB),
+                SAW_ENABLE_PLUGINS: enable(env.SAW_ENABLE_PLUGINS),
+              })
             }
 
             if (req.method === 'GET' && req.url.startsWith('/api/dev/tree')) {
@@ -541,6 +662,21 @@ export default defineConfig(({ mode }) => {
               }
 
               const parsed = parsePatchTouched(patch)
+              // Default: only allow safe patch apply to the workspace (prevents agent touching app source).
+              // Override with env SAW_PATCH_APPLY_ALLOWLIST=".,src/,services/" etc.
+              for (const p of parsed.touched) {
+                if (!isAllowedByPrefixes(p, PATCH_APPLY_ALLOWLIST)) {
+                  await appendSession({ type: 'safe.patch.reject', reason: 'path_not_allowed', path: p, allowlist: PATCH_APPLY_ALLOWLIST })
+                  return json(res, 403, { error: 'path_not_allowed', path: p, allowlist: PATCH_APPLY_ALLOWLIST })
+                }
+              }
+              for (const p of parsed.deleted) {
+                if (!isAllowedByPrefixes(p, PATCH_APPLY_ALLOWLIST)) {
+                  await appendSession({ type: 'safe.patch.reject', reason: 'path_not_allowed', path: p, allowlist: PATCH_APPLY_ALLOWLIST })
+                  return json(res, 403, { error: 'path_not_allowed', path: p, allowlist: PATCH_APPLY_ALLOWLIST })
+                }
+              }
+
               const manifest = await loadCaps()
               for (const p of parsed.touched) {
                 const resolved = safeResolve(ROOT, p)
@@ -779,12 +915,15 @@ export default defineConfig(({ mode }) => {
 
               const system = [
                 'You are SAW Assistant inside a live dev environment.',
-                'You CAN propose code/file changes by outputting a unified diff, and the UI can apply it safely.',
+                'You CAN propose code/file changes by outputting a PatchProposal JSON (preferred) or a unified diff, and the UI can apply it safely.',
                 'You are given prior chat messages + a context block that may include: repo_index_root, repo_index_src, attached_files, recent_logs_tail, recent_errors_tail, recent_session_tail.',
                 'Treat those blocks as your visible environment. Do NOT claim you cannot see files/history if those blocks are present.',
                 '',
                 'When the user asks to modify files/code (edit/add/remove/rename/fix/refactor/commit/create/write):',
-                '- Output ONLY a single ```diff``` fenced block containing a unified diff (git style).',
+                '- Preferred: Output ONLY a single JSON object matching PatchProposal:',
+                '  {id, summary, rationale, scope:{domain, editable_mode_required, allowlist_paths?}, files:[{path,diff,base_hash?}], validation_steps, risk}',
+                '  - Each files[i].diff must be a git-compatible unified diff for that file.',
+                '- Fallback: Output ONLY a single ```diff``` fenced block containing a unified diff (git style).',
                 '- IMPORTANT: Do NOT output placeholders like "New file: path". Always output a real unified diff.',
                 '- For creating a new file, you MUST include these header lines (even if empty):',
                 '  diff --git a/<path> b/<path>',

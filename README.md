@@ -12,6 +12,28 @@ npm run dev
 
 ## Package Index
 
+### Initial Install
+
+```bash
+docker compose up -d
+```
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r services/saw_api/requirements.txt
+python -m uvicorn services.saw_api.app.main:app --host 127.0.0.1 --port 5127
+```
+
+```bash
+# Optional
+export SAW_ENABLE_DB=1
+export SAW_ENABLE_PLUGINS=1
+npm run dev
+```
+
+
+
 ### Scripts
 
 ```bash

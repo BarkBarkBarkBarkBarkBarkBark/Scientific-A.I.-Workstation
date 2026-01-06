@@ -25,6 +25,7 @@ export function BottomPanel() {
   const setTab = useSawStore((s) => s.setBottomTab)
   const logs = useSawStore((s) => s.logs)
   const errors = useSawStore((s) => s.errors)
+  const clearErrors = useSawStore((s) => s.clearErrors)
   const ai = useSawStore((s) => s.aiMessages)
   const openConsoleFullscreen = useSawStore((s) => s.openConsoleFullscreen)
 
@@ -42,6 +43,16 @@ export function BottomPanel() {
             <TabButton active={tab === 'errors'} onClick={() => setTab('errors')}>
               Errors
             </TabButton>
+            {tab === 'errors' && (
+              <button
+                type="button"
+                onClick={clearErrors}
+                className="ml-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+                title="Clear visible Errors panel (real errors remain in the internal error log)"
+              >
+                Clear
+              </button>
+            )}
             <TabButton active={tab === 'ai'} onClick={() => setTab('ai')}>
               AI Suggestions
             </TabButton>

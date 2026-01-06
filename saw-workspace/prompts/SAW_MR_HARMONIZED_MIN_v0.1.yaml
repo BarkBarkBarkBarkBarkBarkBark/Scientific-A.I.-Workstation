@@ -1,0 +1,407 @@
+# SAW_MR_HARMONIZED_MIN_v0.1.yaml
+mr_spec_version: "0.1"
+system: "SAW"
+intent: "Cursor YOLO implementation prompt target: patch engine + db + plugins (minimal viable)."
+
+global_invariants:
+  shell_vs_workspace_separation: true
+  agent_writes: "patches_only"
+  editable_mode_required_for_apply: true
+  rollback_is_first_class: true
+  no_silent_writes: true
+
+paths:
+  shell_root: "./saw-frontend"
+  workspace_root: "./saw-workspace"
+  workspace_allowlist:
+    - "plugins/**"
+    - "tools/**"
+    - "pipelines/**"
+  workspace_denylist:
+    - ".saw/**"
+    - "data/**"
+
+# ============================================================================
+# 1) PATCH ENGINE (standardized patch procedure + show diffs like Cursor/VSCode)
+# ============================================================================
+patching:
+  accepted_patch_format: "unified_diff"   # git-compatible unified diffs :contentReference[oaicite:5]{index=5}
+  conflict_policy:
+    if_dry_run_fails: "do_not_fuzz; request fresh context; regenerate patch"  # :contentReference[oaicite:6]{index=6}
+
+  ui_requirements_min:
+    diff_viewer: "monaco_diff_editor"     # show per-file unified diffs like Cursor/VSCode
+    patch_review_modal:
+      must_show:
+        - "summary"
+        - "rationale"
+        - "files_changed"
+        - "unified_diff_per_file"
+        - "validation_results"
+        - "risk_level"
+      actions:
+        - "accept_apply"
+        - "reject"
+        - "copy_diff"
+
+  schemas:
+    RetrievalRequest:
+      type: "object"
+      required: ["id", "reason", "targets"]
+      properties:
+        id: { type: "string" }
+        reason: { type: "string" }
+        targets:
+          type: "array"
+          items:
+            type: "object"
+            required: ["path", "kind"]
+            properties:
+              path: { type: "string" }
+              kind: { type: "string", enum: ["file", "symbol", "search"] }
+              selector: { type: "string" }
+              max_bytes: { type: "integer", default: 20000 }
+
+    PatchProposal:
+      # NOTE: harmonized to keep only MVP fields required to apply+audit.
+      type: "object"
+      required: ["id", "summary", "rationale", "scope", "files", "validation_steps", "risk"]
+      properties:
+        id: { type: "string" }
+        summary: { type: "string" }
+        rationale: { type: "string" }
+        scope:
+          type: "object"
+          required: ["domain", "editable_mode_required"]
+          properties:
+            domain: { type: "string", enum: ["workspace", "shell_app"] }
+            editable_mode_required: { type: "boolean" }
+            allowlist_paths: { type: "array", items: { type: "string" } }
+        files:
+          type: "array"
+          items:
+            type: "object"
+            required: ["path", "diff"]
+            properties:
+              path: { type: "string" }
+              diff: { type: "string" }       # unified diff for that path :contentReference[oaicite:7]{index=7}
+              base_hash: { type: "string" }  # optional; invalidate if file changed since retrieval
+        validation_steps:
+          type: "array"
+          items: { type: "string" }
+        risk:
+          type: "string"
+          enum: ["low", "medium", "high"]
+
+  patch_application_flow:
+    # transactional apply with rollback guarantees :contentReference[oaicite:8]{index=8}
+    steps:
+      - "precheck: validate PatchProposal schema"
+      - "precheck: domain=workspace requires editable_mode=ON"
+      - "precheck: all target paths within workspace_allowlist and not in denylist"
+      - "precheck: if base_hash provided then verify file hash matches; else require re-retrieval"
+      - "dry_run_apply: git apply --check (or patch-engine equivalent)"
+      - "apply_in_temp_branch_or_temp_dir"
+      - "run_validations"
+      - "commit_changes_if_valid"
+      - "tag_known_good_if_valid"
+      - "rollback_if_any_failure"
+
+  validations_min:
+    workspace_level:
+      - "plugin_manifest_schema_validation"
+      - "plugin_import_smoke_test (if plugin files touched)"
+    shell_level:
+      - "tsc_build (only if shell touched)"
+
+  rollback_min:
+    method_priority:
+      - "git_commit_then_git_revert"
+      - "or_snapshot_copy_to_.saw/snapshots"
+    guarantee: "single-click rollback to last known good state"  # :contentReference[oaicite:9]{index=9}
+
+# ============================================================================
+# 2) DATABASE (Postgres + pgvector + OpenAI embeddings, exposed on a port)
+# ============================================================================
+database:
+  goal: "Local DB service persists across frontend crash; stores docs+embeddings+audit+patch proposals." # :contentReference[oaicite:10]{index=10}
+  postgres:
+    listen:
+      host: "127.0.0.1"
+      port: 54329   # try-first default for SAW instance discovery :contentReference[oaicite:11]{index=11}
+    extensions: ["pgvector", "pgcrypto"]
+    storage:
+      data_dir: ".saw/db"
+    auth_min:
+      mode: "scram"
+      roles:
+        - name: "saw_app"
+          privileges: ["readwrite_runtime"]
+        - name: "saw_admin"
+          privileges: ["migrate", "maintenance"]
+
+  api_service:
+    # recommended so frontend never holds DB creds :contentReference[oaicite:12]{index=12}
+    type: "local_http"
+    listen:
+      host: "127.0.0.1"
+      port: 5127
+    endpoints_min:
+      - "GET /health"
+      - "POST /db/migrate"
+      - "POST /ingest/index"
+      - "POST /embed/upsert"
+      - "POST /search/vector"
+      - "POST /audit/event"
+      - "POST /patch/store_proposal"
+      - "POST /patch/mark_applied"
+
+  schema_min:
+    # keep only what MVP needs (you can add conversations later)
+    tables:
+      saw_meta.instance:
+        columns:
+          - { name: instance_id, type: uuid, pk: true }
+          - { name: created_at, type: timestamptz }
+          - { name: saw_version, type: text }
+          - { name: workspace_root, type: text }
+
+      saw_ingest.document:
+        columns:
+          - { name: doc_id, type: uuid, pk: true }
+          - { name: uri, type: text, unique: true }    # file:///..., saw://...
+          - { name: doc_type, type: text }             # file|symbol|manifest|note
+          - { name: content_hash, type: text }
+          - { name: content_text, type: text }
+          - { name: metadata_json, type: jsonb }
+          - { name: created_at, type: timestamptz }
+
+      saw_ingest.embedding:
+        columns:
+          - { name: doc_id, type: uuid, fk: "saw_ingest.document.doc_id" }
+          - { name: model, type: text }
+          - { name: dims, type: int }
+          - { name: embedding, type: vector }          # pgvector column
+          - { name: created_at, type: timestamptz }
+        indexes:
+          - { type: "pgvector", on: "embedding", method: "hnsw_or_ivfflat" }
+
+      saw_ops.audit_event:
+        columns:
+          - { name: event_id, type: uuid, pk: true }
+          - { name: at, type: timestamptz }
+          - { name: actor, type: text }                # user|agent|system
+          - { name: event_type, type: text }           # patch_proposed|patch_applied|rollback|...
+          - { name: details_json, type: jsonb }
+
+      saw_ops.patch_proposal:
+        columns:
+          - { name: proposal_id, type: uuid, pk: true }
+          - { name: created_at, type: timestamptz }
+          - { name: author, type: text }
+          - { name: diff_unified, type: text }
+          - { name: target_paths, type: text[] }
+          - { name: validation_status, type: text }    # pending|passed|failed
+          - { name: validation_log, type: text }
+          - { name: applied_commit, type: text }
+
+  embeddings_min:
+    provider: "openai_api"
+    idempotency_key: "content_hash+model"              # avoid re-embedding duplicates :contentReference[oaicite:13]{index=13}
+    chunking:
+      max_chars: 4000
+      overlap_chars: 300
+    ingestion_filters:
+      include_globs: ["plugins/**", "tools/**", "pipelines/**"]
+      exclude_globs: ["data/**", "**/*.bin", "**/*.nwb", "**/*.wav", "**/*.mp4"]  # :contentReference[oaicite:14]{index=14}
+
+  connect_to_db_discovery:
+    # minimal safe discovery order :contentReference[oaicite:15]{index=15}
+    preferred_order:
+      - "read .saw/runtime/db.json"
+      - "read env SAW_DB_URL"
+      - "try 127.0.0.1:54329"
+      - "scan localhost allowlist ports: [5432, 54329, 55432]"
+    verification:
+      - "must find saw_meta.instance"
+      - "workspace_root must match current workspace unless user selects otherwise"
+    forbidden:
+      - "scan non-localhost by default"
+      - "connect without verification"
+
+# ============================================================================
+# 3) PLUGIN ARCHITECTURE (wrapper.py format + plugin.yaml manifest + registry)
+# ============================================================================
+plugins:
+  definition: "Plugin = (plugin.yaml + wrapper.py) discovered under workspace/plugins/**" # :contentReference[oaicite:16]{index=16}
+
+  wrapper_contract:
+    file_default: "wrapper.py"
+    required_entrypoint:
+      callable: "main"
+      signature: "main(inputs: dict, params: dict, context) -> dict"          # :contentReference[oaicite:17]{index=17}
+    io_payload_contract:
+      inputs_shape:
+        "<input_name>":
+          data: "<materialized_data_or_handle>"
+          metadata: "<dict>"
+      outputs_shape:
+        "<output_name>":
+          data: "<materialized_data_or_handle>"
+          metadata: "<dict>"
+
+  manifest_contract:
+    # harmonized: use object-maps for inputs/params/outputs (clearer + less churn than arrays)
+    format: "YAML"
+    filename: "plugin.yaml"
+    required_fields:
+      - "id"
+      - "name"
+      - "version"
+      - "description"
+      - "entrypoint"
+      - "environment"
+      - "inputs"
+      - "params"
+      - "outputs"
+      - "execution"
+      - "side_effects"
+      - "resources"
+    entrypoint:
+      required: ["file", "callable"]
+    environment:
+      required: ["python"]
+      optional: ["pip", "lockfile"]
+    side_effects_required:
+      network: ["none", "restricted", "allowed"]
+      disk: ["read_only", "read_write"]
+      subprocess: ["forbidden", "allowed"]
+    resources_required:
+      gpu: ["forbidden", "optional", "required"]
+      optional: ["threads"]
+
+  runtime_components_min:
+    plugin_registry:
+      responsibilities:
+        - "scan workspace/plugins/**/plugin.yaml"
+        - "load YAML"
+        - "validate schema + semantic checks (entrypoint exists)"
+        - "build registry keyed by plugin.id"
+    uv_env_manager:
+      responsibilities:
+        - "env_id = hash(python_constraint + pip_deps + lockfile_contents)"
+        - "create venv at workspace/.saw/plugin_store/envs/<env_id>/"
+        - "install deps via uv (prefer lockfile)"
+      constraints:
+        - "no dependency installation during plugin execution"                # :contentReference[oaicite:18]{index=18}
+    plugin_loader:
+      responsibilities:
+        - "import wrapper module from plugin dir"
+        - "resolve callable"
+        - "validate callable signature"
+    executor:
+      responsibilities:
+        - "validate inputs/params against manifest"
+        - "enforce policy from side_effects/resources"
+        - "invoke wrapper.main"
+        - "validate outputs against manifest"
+        - "write provenance + audit events"
+
+  policy_min:
+    defaults:
+      network: "deny_by_default"
+      disk: "allow_read_only_by_default"
+      subprocess: "forbidden_by_default"
+
+  example_files:
+    plugin_yaml_example: |
+      id: "saw.example.bandpass"
+      name: "Bandpass Filter"
+      version: "0.1.0"
+      description: "Bandpass filter an ndarray signal."
+      entrypoint:
+        file: "wrapper.py"
+        callable: "main"
+      environment:
+        python: ">=3.11,<3.13"
+        pip:
+          - "numpy>=1.26"
+          - "scipy>=1.11"
+      inputs:
+        x:
+          type: "ndarray"
+          dtype: "float32"
+          shape: ["channels", "samples"]
+      params:
+        low_hz:
+          type: "number"
+          default: 300
+          ui: { label: "Low (Hz)" }
+        high_hz:
+          type: "number"
+          default: 6000
+          ui: { label: "High (Hz)" }
+        fs_hz:
+          type: "number"
+          default: 30000
+          ui: { label: "Sampling rate (Hz)" }
+      outputs:
+        y:
+          type: "ndarray"
+          dtype: "float32"
+          shape: ["channels", "samples"]
+      execution:
+        deterministic: true
+        cacheable: true
+      side_effects:
+        network: "none"
+        disk: "read_only"
+        subprocess: "forbidden"
+      resources:
+        gpu: "forbidden"
+        threads: 2
+
+    wrapper_py_example: |
+      \"\"\"SAW Plugin Wrapper
+
+      Contract:
+        - main(inputs: dict, params: dict, context) -> dict
+        - inputs/outputs values are {data, metadata}
+      \"\"\"
+
+      from __future__ import annotations
+
+      import numpy as np
+
+      def main(inputs: dict, params: dict, context) -> dict:
+        # Required input
+        x = inputs["x"]["data"]
+        fs = float(params["fs_hz"])
+        low = float(params["low_hz"])
+        high = float(params["high_hz"])
+
+        context.log("info", "bandpass:start", fs_hz=fs, low_hz=low, high_hz=high)
+
+        # MVP placeholder: implement real scipy filter later
+        y = np.asarray(x, dtype=np.float32)
+
+        return {
+          "y": {
+            "data": y,
+            "metadata": {
+              "fs_hz": fs,
+              "low_hz": low,
+              "high_hz": high,
+            },
+          }
+        }
+
+# ============================================================================
+# CURSOR IMPLEMENTATION TASK LIST (MVP only)
+# ============================================================================
+implementation_plan_mvp:
+  - "Patch engine: define PatchProposal schema + parser; persist proposals to DB; apply via git apply --check + temp branch; commit+tag known-good; rollback on failure."
+  - "UI: patch review modal with Monaco diff viewer; show file list + unified diff; accept/reject; write audit_event."
+  - "DB: start Postgres+pgvector on 127.0.0.1:54329; local API on 127.0.0.1:5127; run migrations; implement minimal endpoints."
+  - "Embeddings: implement ingest->chunk->hash->OpenAI embed->upsert into saw_ingest.document + saw_ingest.embedding (idempotent)."
+  - "Plugins: plugin registry scan plugins/**/plugin.yaml; validate schema; uv env build; load wrapper.main; execute; validate outputs; emit audit+provenance."

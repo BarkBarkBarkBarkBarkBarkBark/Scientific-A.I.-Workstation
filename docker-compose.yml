@@ -1,0 +1,16 @@
+services:
+  saw-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: saw-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:54329:5432"
+    environment:
+      POSTGRES_DB: saw
+      POSTGRES_USER: saw_admin
+      POSTGRES_PASSWORD: saw_admin
+    volumes:
+      - ./.saw/db/postgres:/var/lib/postgresql/data
+      - ./services/db/init:/docker-entrypoint-initdb.d:ro
+
+
