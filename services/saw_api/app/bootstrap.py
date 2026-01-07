@@ -12,6 +12,25 @@ def _repo_root_from_workspace(workspace_root: str) -> str:
     return os.path.abspath(os.path.join(workspace_root, ".."))
 
 
+def _ensure_saw_dirs(settings: Settings) -> dict[str, str]:
+    repo_root = _repo_root_from_workspace(settings.workspace_root)
+    saw_root = os.path.join(repo_root, ".saw")
+
+    # Repo-level runtime directories (NOT under saw-workspace/)
+    paths = {
+        "saw_root": saw_root,
+        "venvs": os.path.join(saw_root, "venvs"),
+        "runs": os.path.join(saw_root, "runs"),
+        "services": os.path.join(saw_root, "services"),
+        "env_manifests": os.path.join(saw_root, "env", "manifests"),
+        "logs": os.path.join(saw_root, "logs"),
+        "runtime": os.path.join(saw_root, "runtime"),
+    }
+    for p in paths.values():
+        os.makedirs(p, exist_ok=True)
+    return paths
+
+
 def _write_runtime_db_json(settings: Settings) -> None:
     repo_root = _repo_root_from_workspace(settings.workspace_root)
     runtime_dir = os.path.join(repo_root, ".saw", "runtime")
@@ -43,6 +62,8 @@ def _write_runtime_db_json(settings: Settings) -> None:
 
 
 def bootstrap(settings: Settings) -> dict:
+    _ = _ensure_saw_dirs(settings)
+
     # Write local connection info for convenience (under .saw/ which is gitignored).
     _write_runtime_db_json(settings)
 

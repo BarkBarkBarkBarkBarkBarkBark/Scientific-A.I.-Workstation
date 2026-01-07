@@ -4,6 +4,8 @@ import { useSawStore } from '../store/useSawStore'
 import { ResizableDivider } from './ui/ResizableDivider'
 import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
 import { IngestDirectoryModule } from './modules/IngestDirectoryModule'
+import { BouncingTextModule } from './modules/BouncingTextModule'
+import { NodeParameters } from './inspector/NodeParameters'
 
 function DropZone(props: {
   index: number
@@ -162,28 +164,34 @@ export function PipelineBuilder() {
                 <div className="text-sm text-zinc-400">
                   Select a module tab to view its output/UI here.
                 </div>
-              ) : activePlugin.id === 'audio_lowpass' ? (
-                <AudioLowpassInspector nodeId={activeNode.id} />
-              ) : activePlugin.id === 'saw.ingest.directory' ? (
-                <IngestDirectoryModule />
               ) : (
-                <div className="space-y-2">
-                  <div className="text-sm text-zinc-200">{activePlugin.description}</div>
-                  <div className="text-xs text-zinc-500">
-                    (Module-specific visualization will live here; for now use the Inspector on the right.)
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-zinc-500">
-                    {activePlugin.inputs.map((i) => (
-                      <span key={i.id} className="rounded bg-zinc-900 px-2 py-0.5">
-                        in:{i.type}
-                      </span>
-                    ))}
-                    {activePlugin.outputs.map((o) => (
-                      <span key={o.id} className="rounded bg-zinc-900 px-2 py-0.5">
-                        out:{o.type}
-                      </span>
-                    ))}
-                  </div>
+                <div className="space-y-3">
+                  <NodeParameters nodeId={activeNode.id} />
+
+                  {activePlugin.id === 'audio_lowpass' ? (
+                    <AudioLowpassInspector nodeId={activeNode.id} />
+                  ) : activePlugin.id === 'saw.ingest.directory' ? (
+                    <IngestDirectoryModule nodeId={activeNode.id} />
+                  ) : activePlugin.id === 'saw.example.bouncing_text' ? (
+                    <BouncingTextModule nodeId={activeNode.id} />
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-sm text-zinc-200">{activePlugin.description}</div>
+                      <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-zinc-500">
+                        {activePlugin.inputs.map((i) => (
+                          <span key={i.id} className="rounded bg-zinc-900 px-2 py-0.5">
+                            in:{i.type}
+                          </span>
+                        ))}
+                        {activePlugin.outputs.map((o) => (
+                          <span key={o.id} className="rounded bg-zinc-900 px-2 py-0.5">
+                            out:{o.type}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="text-xs text-zinc-500">(Module-specific visualization can live below.)</div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -264,12 +272,12 @@ export function PipelineBuilder() {
                   </div>
 
                   <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-zinc-500">
-                    {p.inputs.map((i) => (
+                    {(p?.inputs ?? []).map((i) => (
                       <span key={i.id} className="rounded bg-zinc-900 px-2 py-0.5">
                         in:{i.type}
                       </span>
                     ))}
-                    {p.outputs.map((o) => (
+                    {(p?.outputs ?? []).map((o) => (
                       <span key={o.id} className="rounded bg-zinc-900 px-2 py-0.5">
                         out:{o.type}
                       </span>

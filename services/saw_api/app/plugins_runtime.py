@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
 
+from . import env_manager
 from .settings import Settings
 
 
@@ -31,6 +29,7 @@ class EnvironmentSpec(BaseModel):
     python: str
     pip: list[str] = Field(default_factory=list)
     lockfile: str | None = None
+    requirements: str | None = None
 
 
 class IoSpec(BaseModel):
@@ -78,29 +77,6 @@ class DiscoveredPlugin:
     plugin_dir: str
 
 
-def _hash_env(env: EnvironmentSpec) -> str:
-    h = hashlib.sha256()
-    h.update((env.python or "").encode("utf-8"))
-    h.update(b"\n")
-    for d in env.pip or []:
-        h.update(str(d).encode("utf-8"))
-        h.update(b"\n")
-    if env.lockfile:
-        h.update(str(env.lockfile).encode("utf-8"))
-        h.update(b"\n")
-    return h.hexdigest()[:24]
-
-
-def _repo_root_from_workspace(workspace_root: str) -> str:
-    return os.path.abspath(os.path.join(workspace_root, ".."))
-
-
-def _venv_python(venv_dir: str) -> str:
-    if os.name == "nt":
-        return os.path.join(venv_dir, "Scripts", "python.exe")
-    return os.path.join(venv_dir, "bin", "python")
-
-
 def discover_plugins(settings: Settings) -> list[DiscoveredPlugin]:
     root = settings.workspace_root
     plugins_dir = os.path.join(root, "plugins")
@@ -121,35 +97,28 @@ def discover_plugins(settings: Settings) -> list[DiscoveredPlugin]:
     return out
 
 
-def ensure_env(settings: Settings, env: EnvironmentSpec) -> tuple[str, str]:
-    repo_root = _repo_root_from_workspace(settings.workspace_root)
-    store_root = os.path.join(repo_root, ".saw", "plugin_store", "envs")
-    os.makedirs(store_root, exist_ok=True)
-    env_id = _hash_env(env)
-    venv_dir = os.path.join(store_root, env_id)
-    py = _venv_python(venv_dir)
-
-    if not os.path.exists(py):
-        subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
-
-    deps = [d for d in (env.pip or []) if str(d).strip()]
-    if deps:
-        uv = shutil.which("uv")
-        if uv:
-            subprocess.run([uv, "pip", "install", "--python", py, *deps], check=True)
-        else:
-            subprocess.run([py, "-m", "pip", "install", *deps], check=True)
-
-    return env_id, py
-
-
 def execute_plugin(
     settings: Settings,
     plugin: DiscoveredPlugin,
     inputs: dict[str, Any],
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    _env_id, py = ensure_env(settings, plugin.manifest.environment)
+    # Compute env_key + write env manifest (repo_root/.saw/env/manifests/<env_key>.json)
+    # The returned env_key becomes the stable identifier we use for caching.
+    er = env_manager.compute_env_resolution(
+        settings=settings,
+        plugin_dir=plugin.plugin_dir,
+        plugin_id=plugin.manifest.id,
+        plugin_version=plugin.manifest.version,
+        env_python=plugin.manifest.environment.python,
+        env_lockfile=plugin.manifest.environment.lockfile,
+        env_requirements=getattr(plugin.manifest.environment, "requirements", None),
+        env_pip=plugin.manifest.environment.pip,
+        extras={"cuda": "none"},
+    )
+
+    py = env_manager.ensure_env(settings, er.env_key, er.deps, plugin_dir=plugin.plugin_dir)
+    _ = er
 
     entry_file = plugin.manifest.entrypoint.file
     entry_callable = plugin.manifest.entrypoint.callable
@@ -162,11 +131,25 @@ def execute_plugin(
         "inputs": inputs or {},
         "params": params or {},
     }
+    
+    # Set up environment with SAW_RUN_DIR for plugins that need to write files
+    env = dict(os.environ)
+    # Create a temporary run directory for synchronous execution
+    import tempfile
+    import time
+    run_id = f"sync_{int(time.time() * 1000)}"
+    temp_run_dir = os.path.join(settings.workspace_root, ".saw", "runs", plugin.manifest.id, run_id)
+    os.makedirs(temp_run_dir, exist_ok=True)
+    os.makedirs(os.path.join(temp_run_dir, "output"), exist_ok=True)
+    os.makedirs(os.path.join(temp_run_dir, "logs"), exist_ok=True)
+    env["SAW_RUN_DIR"] = temp_run_dir
+    
     p = subprocess.run(
         [py, runner],
         input=json.dumps(payload).encode("utf-8"),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
         check=False,
     )
     if p.returncode != 0:

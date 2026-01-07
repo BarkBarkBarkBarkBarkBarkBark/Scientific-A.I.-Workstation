@@ -5,7 +5,9 @@ import { Panel } from './ui/Panel'
 import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
 import { SourceViewer } from './SourceViewer'
 import { IngestDirectoryModule } from './modules/IngestDirectoryModule'
+import { BouncingTextModule } from './modules/BouncingTextModule'
 import { ReadOnlyFileViewer } from './ReadOnlyFileViewer'
+import { NodeParameters } from './inspector/NodeParameters'
 
 export function ModuleFullscreenModal() {
   const fullscreen = useSawStore((s) => s.fullscreen)
@@ -60,16 +62,22 @@ export function ModuleFullscreenModal() {
           <div className="grid h-full grid-cols-[1.1fr,0.9fr] gap-2 p-2">
             <Panel title="Module" className="min-h-0 overflow-hidden">
               <div className="h-full overflow-auto p-3">
-                {plugin.id === 'audio_lowpass' ? (
-                  <AudioLowpassInspector nodeId={node.id} />
-                ) : plugin.id === 'saw.ingest.directory' ? (
-                  <IngestDirectoryModule />
-                ) : (
-                  <div className="space-y-2">
-                    <div className="text-sm text-zinc-200">{plugin.description}</div>
-                    <div className="text-xs text-zinc-500">(TODO: module-specific UI goes here.)</div>
-                  </div>
-                )}
+                <div className="space-y-3">
+                  <NodeParameters nodeId={node.id} />
+
+                  {plugin.id === 'audio_lowpass' ? (
+                    <AudioLowpassInspector nodeId={node.id} />
+                  ) : plugin.id === 'saw.ingest.directory' ? (
+                    <IngestDirectoryModule nodeId={node.id} />
+                  ) : plugin.id === 'saw.example.bouncing_text' ? (
+                    <BouncingTextModule nodeId={node.id} />
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-sm text-zinc-200">{plugin.description}</div>
+                      <div className="text-xs text-zinc-500">(TODO: module-specific UI goes here.)</div>
+                    </div>
+                  )}
+                </div>
               </div>
             </Panel>
 

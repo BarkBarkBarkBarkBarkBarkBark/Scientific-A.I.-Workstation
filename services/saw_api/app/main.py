@@ -13,8 +13,11 @@ from .db import db_conn, jsonable, jsonb, sha256_text
 from .embeddings import chunk_text, embed_texts
 from .migrations import migrate
 from .plugins_runtime import discover_plugins, execute_plugin
+from .run_manager import get_run as get_run_info
+from .run_manager import spawn_run
 from .settings import get_settings
 from .bootstrap import bootstrap
+from .service_manager import startup_recover, stop_service
 
 
 settings = get_settings()
@@ -34,6 +37,7 @@ def _startup() -> None:
     # Best-effort: write db.json and auto-init schema (idempotent).
     try:
         bootstrap(settings)
+        startup_recover(settings)
     except Exception:
         # Don't fail API startup in dev; endpoints can still be used to debug.
         pass
@@ -523,4 +527,98 @@ def plugins_execute(req: PluginExecuteRequest) -> PluginExecuteResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"plugin_execute_failed: {e}")
 
+
+class PluginRunRequest(BaseModel):
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class PluginRunResponse(BaseModel):
+    ok: bool
+    plugin_id: str
+    run_id: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    env_key: str
+    run_dir: str
+
+
+@app.post("/api/plugins/{plugin_id}/run", response_model=PluginRunResponse)
+def api_plugin_run(plugin_id: str, req: PluginRunRequest) -> PluginRunResponse:
+    pid = (plugin_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="missing_plugin_id")
+    plugins = {p.manifest.id: p for p in discover_plugins(settings)}
+    plugin = plugins.get(pid)
+    if not plugin:
+        raise HTTPException(status_code=404, detail="unknown_plugin_id")
+
+    try:
+        rs = spawn_run(
+            settings,
+            plugin_id=plugin.manifest.id,
+            plugin_version=plugin.manifest.version,
+            plugin_dir=plugin.plugin_dir,
+            entry_file=plugin.manifest.entrypoint.file,
+            entry_callable=plugin.manifest.entrypoint.callable,
+            env_python=plugin.manifest.environment.python,
+            env_lockfile=plugin.manifest.environment.lockfile,
+            env_requirements=getattr(plugin.manifest.environment, "requirements", None),
+            env_pip=plugin.manifest.environment.pip,
+            inputs=req.inputs,
+            params=req.params,
+        )
+        return PluginRunResponse(
+            ok=True,
+            plugin_id=plugin.manifest.id,
+            run_id=rs.run_id,
+            status=rs.status,
+            env_key=rs.env_key,
+            run_dir=rs.run_dir,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"plugin_run_failed: {e}")
+
+
+class RunGetResponse(BaseModel):
+    ok: bool
+    plugin_id: str
+    run_id: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    env_key: str | None = None
+    run_dir: str
+    outputs: dict[str, Any] = Field(default_factory=dict)
+    logs_path: str
+    services: list[dict[str, Any]] = Field(default_factory=list)
+    error_text: str | None = None
+
+
+@app.get("/api/runs/{plugin_id}/{run_id}", response_model=RunGetResponse)
+def api_get_run(plugin_id: str, run_id: str) -> RunGetResponse:
+    info = get_run_info(settings, plugin_id=plugin_id, run_id=run_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="run_not_found")
+    return RunGetResponse(
+        ok=True,
+        plugin_id=info.plugin_id,
+        run_id=info.run_id,
+        status=info.status,
+        env_key=info.env_key,
+        run_dir=info.run_dir,
+        outputs=info.outputs or {},
+        logs_path=info.logs_path,
+        services=info.services or [],
+        error_text=info.error_text,
+    )
+
+
+class ServiceStopResponse(BaseModel):
+    ok: bool
+    stopped: bool
+    prior_status: str
+
+
+@app.post("/api/services/{service_id}/stop", response_model=ServiceStopResponse)
+def api_stop_service(service_id: str) -> ServiceStopResponse:
+    stopped, prior = stop_service(settings, service_id)
+    return ServiceStopResponse(ok=True, stopped=bool(stopped), prior_status=str(prior))
 

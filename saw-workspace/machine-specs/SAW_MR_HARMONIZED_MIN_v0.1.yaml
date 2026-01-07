@@ -9,6 +9,14 @@ global_invariants:
   editable_mode_required_for_apply: true
   rollback_is_first_class: true
   no_silent_writes: true
+  python_defaults:
+    # Always use `python` (not python3). Prefer repo-root .venv for all python commands.
+    python_cmd: "python"
+    venv_root: "./.venv"
+    activate_venv_cmd: "source .venv/bin/activate"
+    # Default for any python-based validations/tests:
+    #   source .venv/bin/activate && pip install -r services/saw_api/requirements.txt && python -m pytest ...
+    ensure_venv_deps_cmd: "pip install -r services/saw_api/requirements.txt"
 
 paths:
   shell_root: "./saw-frontend"
@@ -155,6 +163,10 @@ database:
       - "POST /audit/event"
       - "POST /patch/store_proposal"
       - "POST /patch/mark_applied"
+      # Async plugin runs + service control (runtime)
+      - "POST /api/plugins/{plugin_id}/run"
+      - "GET /api/runs/{plugin_id}/{run_id}"
+      - "POST /api/services/{service_id}/stop"
 
   schema_min:
     # keep only what MVP needs (you can add conversations later)
@@ -204,6 +216,38 @@ database:
           - { name: validation_status, type: text }    # pending|passed|failed
           - { name: validation_log, type: text }
           - { name: applied_commit, type: text }
+
+      # Async plugin execution tracking
+      saw_runs:
+        columns:
+          - { name: id, type: uuid, pk: true }
+          - { name: plugin_id, type: text }
+          - { name: plugin_version, type: text }
+          - { name: run_id, type: text, unique: true }
+          - { name: env_key, type: text }
+          - { name: run_dir, type: text }
+          - { name: status, type: text }
+          - { name: created_at, type: timestamptz }
+          - { name: started_at, type: timestamptz }
+          - { name: finished_at, type: timestamptz }
+          - { name: inputs_json, type: jsonb }
+          - { name: params_json, type: jsonb }
+          - { name: outputs_json, type: jsonb }
+          - { name: error_text, type: text }
+
+      saw_services:
+        columns:
+          - { name: id, type: uuid, pk: true }
+          - { name: service_id, type: text, unique: true }
+          - { name: plugin_id, type: text }
+          - { name: run_id, type: text }
+          - { name: name, type: text }
+          - { name: pid, type: int }
+          - { name: port, type: int }
+          - { name: url, type: text }
+          - { name: status, type: text }
+          - { name: created_at, type: timestamptz }
+          - { name: updated_at, type: timestamptz }
 
   embeddings_min:
     provider: "openai_api"
@@ -289,11 +333,31 @@ plugins:
         - "build registry keyed by plugin.id"
     uv_env_manager:
       responsibilities:
-        - "env_id = hash(python_constraint + pip_deps + lockfile_contents)"
-        - "create venv at workspace/.saw/plugin_store/envs/<env_id>/"
+        - "env_key = sha256(canonical_json(platform + python_major_minor + deps_content_sha256))[:16]"
+        - "create venv at repo_root/.saw/venvs/<env_key>/"
         - "install deps via uv (prefer lockfile)"
       constraints:
         - "no dependency installation during plugin execution"                # :contentReference[oaicite:18]{index=18}
+
+    run_manager:
+      responsibilities:
+        - "create run_dir at repo_root/.saw/runs/<plugin_id>/<run_id>/{input,work,output,logs}"
+        - "write run.json (status transitions queued->running->(succeeded|failed))"
+        - "spawn wrapper runner subprocess using venv python"
+        - "capture stdout/stderr to logs/plugin.log"
+        - "require output/results.json and validate output paths under run_dir/output"
+
+    service_manager:
+      responsibilities:
+        - "allocate free localhost ports in range 49152-65535 (retry up to 50)"
+        - "persist service registry at repo_root/.saw/services/<service_id>.json"
+        - "startup recovery scan: mark running/stale based on pid"
+        - "stop service by pid (best-effort)"
+
+  runner_output_contract:
+    results_json_path: "<run_dir>/output/results.json"
+    results_json_schema_min: "{ outputs: dict, services: list, metrics: dict }"
+    optional_stdout_line: "SAW_RESULT:{...json...}"
     plugin_loader:
       responsibilities:
         - "import wrapper module from plugin dir"

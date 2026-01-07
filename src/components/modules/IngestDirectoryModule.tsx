@@ -10,16 +10,19 @@ type ExecuteResponse = {
   detail?: any
 }
 
-export function IngestDirectoryModule() {
+export function IngestDirectoryModule(props: { nodeId?: string }) {
   const [directory, setDirectory] = useState('.')
-  const [query, setQuery] = useState('patch engine')
-  const [topK, setTopK] = useState(8)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string>('')
   const [error, setError] = useState<string>('')
 
+  const node = useSawStore((s) => s.nodes.find((n) => n.id === (props.nodeId ?? s.selectedNodeId)) ?? null)
+  const updateNodeParam = useSawStore((s) => s.updateNodeParam)
   const plugin = useSawStore((s) => s.pluginCatalog.find((p) => p.id === 'saw.ingest.directory') ?? null)
   const hint = useMemo(() => (plugin?.description ? plugin.description : 'Index workspace files into the vector DB.'), [plugin?.description])
+
+  const query = String(node?.data.params['query'] ?? 'patch engine')
+  const topK = Number(node?.data.params['top_k'] ?? 8)
 
   return (
     <div className="space-y-2">
@@ -71,7 +74,10 @@ export function IngestDirectoryModule() {
         <div className="mt-2 grid grid-cols-[1fr,120px] gap-2">
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value
+              if (node) updateNodeParam(node.id, 'query', v)
+            }}
             placeholder="Optional: query for nearest neighbors after ingest"
             className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-700"
             disabled={busy}
@@ -79,7 +85,10 @@ export function IngestDirectoryModule() {
           <input
             type="number"
             value={topK}
-            onChange={(e) => setTopK(Number(e.target.value))}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              if (node) updateNodeParam(node.id, 'top_k', v)
+            }}
             min={1}
             max={50}
             step={1}

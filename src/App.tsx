@@ -23,6 +23,8 @@ export function App() {
         leftWidthOpen: 280,
         leftCollapsed: false,
         rightWidth: 340,
+        rightWidthOpen: 340,
+        rightCollapsed: false,
         bottomHeight: 240,
       },
   )
@@ -99,8 +101,8 @@ export function App() {
                 orientation="vertical"
                 value={layout.rightWidth}
                 setValue={(v) => setLayout({ rightWidth: v })}
-                min={260}
-                max={560}
+                min={layout.rightCollapsed ? 56 : 260}
+                max={layout.rightCollapsed ? 56 : 560}
               />
             </div>
 
