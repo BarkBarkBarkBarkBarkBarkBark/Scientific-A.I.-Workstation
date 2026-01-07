@@ -87,6 +87,7 @@ type SawState = {
   refreshAiStatus: () => Promise<void>
   submitGoal: (goal: string) => Promise<void>
   sendChat: (text: string) => Promise<void>
+  clearChat: () => void
   devAttachPath: (path: string) => void
   devDetachPath: (path: string) => void
   devClearAttachments: () => void
@@ -527,6 +528,20 @@ const _useSawStore = create<SawState>((set, get) => ({
     }
   },
 
+  clearChat: () => {
+    set((s) => ({
+      chat: {
+        messages: [
+          {
+            role: 'assistant',
+            content: 'SAW Chat is ready. Ask for pipeline help, debugging ideas, or how to use a module.',
+          },
+        ],
+      },
+      logs: [...s.logs, '[chat] cleared'],
+    }))
+  },
+
   sendChat: async (text) => {
     const content = text.trim()
     if (!content) return
@@ -905,6 +920,22 @@ const _useSawStore = create<SawState>((set, get) => ({
                       `- Set Rule path to "${j.path}" (or "." to allow root)\n` +
                       `- Enable W\n` +
                       `- Retry Apply patch`,
+                  },
+                ],
+              },
+            }))
+          }
+          if (j?.error === 'target_dirty' && Array.isArray(j?.paths) && j.paths.length) {
+            set((s) => ({
+              chat: {
+                messages: [
+                  ...s.chat.messages,
+                  {
+                    role: 'assistant',
+                    content:
+                      `Apply patch blocked (target has local edits).\n\n` +
+                      `Paths:\n- ${j.paths.map((x: any) => String(x)).join('\n- ')}\n\n` +
+                      `Fix:\n- Revert/commit those files, then retry Apply patch.`,
                   },
                 ],
               },

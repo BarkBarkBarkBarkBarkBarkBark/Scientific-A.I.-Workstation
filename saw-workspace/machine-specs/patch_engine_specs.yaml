@@ -1,0 +1,381 @@
+saw_spec_version: "0.1"
+name: "Scientific AI Workstation (SAW)"
+purpose: "Local-first, DAW-like visual workstation for scientific computing with agent-assisted, patch-based development."
+
+core_principles:
+  - local_first: true
+  - human_in_the_loop: true
+  - patch_only_edits: true
+  - shell_vs_workspace_separation: true
+  - deterministic_rollback: true
+  - least_privilege: true
+  - no_silent_writes: true
+
+domains:
+  shell_app:
+    description: "Stable UI/DAW shell. Rarely modified. Reloads acceptable when shell changes."
+    tech_stack:
+      - "React"
+      - "TypeScript"
+      - "Vite"
+      - "TailwindCSS"
+      - "React Flow"
+      - "Zustand"
+      - "Monaco Editor"
+    write_policy:
+      default: "deny"
+      agent_can:
+        - "read"
+        - "propose_patch"
+      agent_cannot:
+        - "apply_patch"
+        - "direct_write"
+      unlock_condition:
+        requires_user_confirmation: true
+        warning: "Editing shell will trigger dev-server reload / restart."
+    filesystem_root: "./saw-frontend"
+    structure:
+      - "src/"
+      - "src/components/"
+      - "src/store/"
+      - "src/main.tsx"
+
+  workspace:
+    description: "Mutable user territory. Indexed, vectorized, executed. Must not trigger shell reload."
+    filesystem_root: "./saw-workspace"
+    structure:
+      - "plugins/"
+      - "tools/"
+      - "pipelines/"
+      - "data/"          # optional, typically excluded from indexing
+      - ".saw/"
+      - ".saw/index/"
+      - ".saw/snapshots/"
+      - ".saw/locks.json"
+    write_policy:
+      default: "read_only"
+      agent_can:
+        - "read"
+        - "propose_patch"
+      agent_can_conditionally:
+        apply_patch:
+          requires:
+            - "editable_mode_enabled"
+            - "path_in_allowlist"
+            - "patch_validated"
+      agent_cannot:
+        - "direct_write"
+        - "edit_locks_or_index_metadata"
+    allowlist_paths:
+      - "plugins/**"
+      - "tools/**"
+      - "pipelines/**"
+    denylist_paths:
+      - ".saw/**"
+      - "data/**" # unless explicitly allowed
+    editable_mode:
+      description: "User-controlled state enabling patch application within allowlist."
+      states:
+        - "OFF"
+        - "ON"
+      defaults:
+        state: "OFF"
+        scope: "plugins/**,tools/**,pipelines/**"
+
+indexing_and_context:
+  goal: "Provide high-signal repo/workspace context to the agent without sending entire codebase."
+  sources:
+    shell_app:
+      index: false
+      provide_repo_map_only: true
+    workspace:
+      index: true
+      include:
+        - "plugins/**"
+        - "tools/**"
+        - "pipelines/**"
+      exclude:
+        - ".saw/**"
+        - "data/**"
+  repo_map:
+    required_every_agent_run: true
+    contents:
+      - "directory_tree_top_levels"
+      - "key_files_list"
+      - "open_files_and_selected_node"
+      - "recent_diffs_or_applied_patches"
+      - "editable_mode_state_and_scope"
+  symbol_index:
+    required: true
+    extraction:
+      - "file_path"
+      - "language"
+      - "exports"
+      - "classes"
+      - "functions"
+      - "methods"
+      - "attributes"
+      - "signatures"
+      - "docstrings_or_comments"
+    storage:
+      relational: "sqlite_or_postgres"
+  vector_index:
+    required: true
+    chunking:
+      strategy: "symbol_or_block"
+      max_chars: 3000
+      overlap_chars: 200
+    storage:
+      vector_store: "pgvector_or_local"
+  retrieval_policy:
+    rules:
+      - "agent_must_request_retrieval_for_any_file_content_not_in_context"
+      - "agent_must_cite_paths_used_in_patch_rationale"
+      - "if_workspace_file_hash_changed_since_retrieval_then_patch_invalid_and_retrieve_again"
+
+patching_model:
+  invariant: "Agents never write files directly; only propose patches."
+  accepted_patch_format: "unified_diff"
+  patch_application:
+    strategy: "transactional"
+    steps:
+      - "precheck: validate_patch_schema"
+      - "precheck: ensure_paths_within_allowlist"
+      - "precheck: ensure_editable_mode_on"
+      - "precheck: verify_file_hashes_or_context"
+      - "dry_run_apply: git_apply_check_or_patch_engine_check"
+      - "apply_to_temp: apply_patch_in_temp_workspace_or_branch"
+      - "validate: run_validations"
+      - "commit_or_snapshot: persist_changes_if_validations_pass"
+      - "rollback: automatic_if_any_step_fails"
+  rollback:
+    method:
+      - "git_commit_and_revert"
+      - "or_snapshot_copy_in_.saw/snapshots"
+    guarantee: "single-click rollback to last known good state"
+  validations:
+    workspace_level:
+      - "manifest_schema_validation"
+      - "plugin_import_smoke_test"
+      - "optional_unit_tests"
+    shell_level:
+      - "tsc_build"
+      - "eslint"
+      - "npm_run_build"
+  conflict_policy:
+    rule: "if patch fails dry-run, do not fuzz; retrieve fresh context and regenerate patch"
+
+agent_contract:
+  required_outputs:
+    - "RetrievalRequest"
+    - "PatchProposal"
+    - "ExecutionPlan"
+  forbidden_behaviors:
+    - "guess_unretrieved_code"
+    - "direct_write_instructions"
+    - "apply_patch_without_user_permission"
+    - "edit_shell_without_explicit_unlock"
+  response_modes:
+    - "read_only_assist"
+    - "propose_patch"
+    - "propose_patch_and_request_apply"
+
+schemas:
+  RetrievalRequest:
+    type: "object"
+    required: ["id", "reason", "targets"]
+    properties:
+      id: { type: "string" }
+      reason: { type: "string" }
+      targets:
+        type: "array"
+        items:
+          type: "object"
+          required: ["path", "kind"]
+          properties:
+            path: { type: "string" }
+            kind:
+              type: "string"
+              enum: ["file", "symbol", "search"]
+            selector: { type: "string" } # e.g., function name, regex, or query string
+            max_bytes: { type: "integer", default: 20000 }
+
+  PatchProposal:
+    type: "object"
+    required:
+      - "id"
+      - "summary"
+      - "rationale"
+      - "scope"
+      - "files"
+      - "expected_impact"
+      - "validation_steps"
+      - "risk"
+    properties:
+      id: { type: "string" }
+      summary: { type: "string" }
+      rationale: { type: "string" }
+      scope:
+        type: "object"
+        required: ["domain", "editable_mode_required"]
+        properties:
+          domain: { type: "string", enum: ["workspace", "shell_app"] }
+          editable_mode_required: { type: "boolean" }
+          allowlist_paths: { type: "array", items: { type: "string" } }
+      files:
+        type: "array"
+        items:
+          type: "object"
+          required: ["path", "diff"]
+          properties:
+            path: { type: "string" }
+            diff: { type: "string" } # unified diff for that path
+            base_hash: { type: "string" } # optional content hash of retrieved version
+      expected_impact:
+        type: "array"
+        items: { type: "string" }
+      validation_steps:
+        type: "array"
+        items: { type: "string" }
+      risk:
+        type: "string"
+        enum: ["low", "medium", "high"]
+
+  PluginManifestV1:
+    type: "object"
+    required: ["id", "name", "version", "description", "inputs", "outputs", "parameters", "entrypoint"]
+    properties:
+      id: { type: "string" }
+      name: { type: "string" }
+      version: { type: "string" }
+      description: { type: "string" }
+      language: { type: "string", enum: ["python"], default: "python" }
+      entrypoint:
+        type: "object"
+        required: ["file", "callable"]
+        properties:
+          file: { type: "string" }      # e.g., "plugin.py"
+          callable: { type: "string" }  # e.g., "run"
+      inputs:
+        type: "array"
+        items:
+          type: "object"
+          required: ["id", "type"]
+          properties:
+            id: { type: "string" }
+            type: { type: "string" } # string type matching is OK for MVP
+            description: { type: "string" }
+      outputs:
+        type: "array"
+        items:
+          type: "object"
+          required: ["id", "type"]
+          properties:
+            id: { type: "string" }
+            type: { type: "string" }
+            description: { type: "string" }
+      parameters:
+        type: "array"
+        items:
+          type: "object"
+          required: ["id", "label", "kind", "default"]
+          properties:
+            id: { type: "string" }
+            label: { type: "string" }
+            kind: { type: "string", enum: ["text", "number", "select", "bool"] }
+            default: {}
+            options: { type: "array", items: {} }
+      ui:
+        type: "object"
+        properties:
+          inspector_sections:
+            type: "array"
+            items:
+              type: "object"
+              required: ["id", "title", "kind"]
+              properties:
+                id: { type: "string" }
+                title: { type: "string" }
+                kind: { type: "string", enum: ["classes", "functions", "methods", "attributes", "markdown"] }
+                source: { type: "string" } # e.g., "ast" or "static"
+
+runtime_and_execution:
+  status_model:
+    node_status_enum: ["idle", "running", "error"]
+  runner_interface:
+    description: "Abstract execution surface; implementations can be mocked or real."
+    methods:
+      - name: "readFile"
+        args: ["path"]
+        returns: "string"
+      - name: "listFiles"
+        args: ["glob"]
+        returns: "string[]"
+      - name: "runCommand"
+        args: ["cmd", "cwd", "env"]
+        returns: "CommandResult"
+      - name: "validate"
+        args: ["validation_steps"]
+        returns: "ValidationResult"
+      - name: "applyPatch"
+        args: ["PatchProposal"]
+        returns: "ApplyResult"
+  command_result_schema:
+    CommandResult:
+      type: "object"
+      required: ["exitCode", "stdout", "stderr"]
+      properties:
+        exitCode: { type: "integer" }
+        stdout: { type: "string" }
+        stderr: { type: "string" }
+  validation_result_schema:
+    ValidationResult:
+      type: "object"
+      required: ["ok", "results"]
+      properties:
+        ok: { type: "boolean" }
+        results:
+          type: "array"
+          items:
+            type: "object"
+            required: ["step", "ok", "output"]
+            properties:
+              step: { type: "string" }
+              ok: { type: "boolean" }
+              output: { type: "string" }
+  apply_result_schema:
+    ApplyResult:
+      type: "object"
+      required: ["ok", "message"]
+      properties:
+        ok: { type: "boolean" }
+        message: { type: "string" }
+        rollback_available: { type: "boolean", default: true }
+        snapshot_id: { type: "string" }
+
+ui_requirements:
+  layout:
+    - "top_bar: title + editable_mode_toggle"
+    - "left_sidebar: plugin_browser"
+    - "center: node_graph_canvas"
+    - "right_sidebar: inspector + symbol_views"
+    - "bottom_panel: logs/errors/ai_suggestions/console"
+  key_interactions:
+    - "drag_plugin_to_canvas_creates_node"
+    - "connections_allowed_only_if_port_types_match"
+    - "select_node_populates_inspector"
+    - "describe_goal_generates_mock_plan_and_optional_autoplace"
+    - "editable_mode_enables_code_editor_modal_with_diff_preview"
+  persistence:
+    - "graph_state_saved_in_workspace/pipelines/*.saw.json"
+    - "ui_session_state_optional_localstorage"
+
+non_goals:
+  - "no auth for MVP"
+  - "no unrestricted agent writes"
+  - "no silent file modification"
+  - "no backend required beyond local runner and OpenAI API calls"
+  - "no mandatory cloud execution of user code"
+  - "no filesystem access from browser beyond controlled runner API"
+  - "no assumption of continuous internet connectivity beyond LLM calls"
+  - "no requirement for model fine-tuning in MVP"

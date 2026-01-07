@@ -1,0 +1,345 @@
+# MR_SAW_AGENT_SERVER_SPEC_v0.1.yaml
+mr_spec_version: "0.1"
+system: "SAW"
+component: "agent_server"
+purpose: >
+  Provide Cursor-like agentic capabilities (planning + retrieval orchestration + patch proposal generation)
+  while enforcing SAW invariants: patch-only edits, human-in-the-loop apply, least privilege,
+  shell vs workspace separation, deterministic rollback via Patch Engine.
+
+design_goals:
+  - "Provider-agnostic LLM layer (OpenAI now; Bedrock later)"
+  - "Tool-calling with strict allowlists and scoped capabilities"
+  - "No direct filesystem writes by agent"
+  - "High observability: structured logs, traces, audit events"
+  - "Reproducible runs: request_id + repo_state captured"
+  - "Fast iteration: local-first dev; deployable as service later"
+
+non_goals_mvp:
+  - "No autonomous patch application"
+  - "No arbitrary shell execution from the agent"
+  - "No multi-user auth (single-user local session is OK)"
+  - "No long-term memory beyond SAW DB indices (optional later)"
+
+service_topology:
+  mode: "local_service"
+  processes:
+    - name: "saw_api"          # existing backend orchestrator
+    - name: "agent_server"     # this spec
+    - name: "patch_engine"     # separate; authoritative applier
+  communication:
+    - protocol: "http_json"
+    - auth_between_services: "shared_secret_or_local_loopback_only"
+
+runtime:
+  language: "python"
+  framework:
+    http: "FastAPI"
+    server: "uvicorn"
+  concurrency:
+    model: "async"
+    max_concurrent_requests: 4
+  packaging:
+    tool: "uv"
+    env_strategy: "global_env_for_agent_server"  # separate from per-plugin envs
+  configuration:
+    sources: ["env", "config_yaml"]
+    required_env:
+      - "SAW_WORKSPACE_ROOT"
+      - "SAW_REPO_ROOT"
+      - "SAW_AGENT_SHARED_SECRET"
+      - "OPENAI_API_KEY"         # optional depending on provider
+      - "AWS_REGION"             # for bedrock later
+      - "AWS_PROFILE"            # optional local dev
+
+security_model:
+  trust_boundaries:
+    - "Agent output is untrusted text"
+    - "Only Patch Engine can write/apply patches"
+    - "Agent Server may request reads via saw_api tools, never direct FS access"
+  session_identity:
+    description: "Single-user local session; still required for capability gating + audit."
+    fields: ["session_id", "user_id"]
+  capabilities:
+    description: >
+      Backend (saw_api) issues short-lived capability tokens for tools.
+      Agent Server must present capability tokens to invoke any tool.
+    token_transport: "bearer_token"
+    ttl_seconds_default: 60
+    scopes:
+      - "fs.read"
+      - "repo.search"
+      - "index.query.symbol"
+      - "index.query.vector"
+      - "propose_patch"
+      - "proc.exec:validate"     # optional; through saw_api, allowlisted only
+    write_scopes:
+      prohibited: true           # no fs.write, no git.apply in agent_server
+  path_policies:
+    read_allowlist_default:
+      - "saw-workspace/**"
+      - "saw-frontend/**"        # read ok
+    read_denylist_always:
+      - "**/.env"
+      - "**/*.pem"
+      - "**/*.key"
+      - "**/.ssh/**"
+      - "saw-workspace/.saw/**"  # except via dedicated index APIs
+    write_allowlist:
+      - "NONE"                   # agent server never writes
+
+llm_providers:
+  abstraction: "ProviderAdapter"
+  default_provider: "openai"
+  providers:
+    openai:
+      api: "OpenAI Responses API"
+      models:
+        reasoning: "gpt-5.x"      # placeholder; resolved via config
+        fast: "gpt-4o-mini"       # placeholder
+      features:
+        - "tool_calling"
+        - "json_schema_outputs"
+    bedrock:
+      api: "AWS Bedrock Converse/InvokeModel"
+      models:
+        reasoning: "TBD"
+        fast: "TBD"
+      features:
+        - "tool_calling (via framework abstraction)"
+  provider_switching:
+    mechanism: "config flag (LLM_PROVIDER=openai|bedrock)"
+    rule: "No changes required to tool schemas or PatchProposal schema"
+
+agent_architecture:
+  orchestration_style: "state_machine"
+  recommended_framework:
+    - "LangGraph (preferred) OR Semantic Kernel (acceptable)"
+  states:
+    - name: "ingest_request"
+      output: ["NormalizedUserIntent"]
+    - name: "plan"
+      output: ["ExecutionPlan"]
+    - name: "retrieve"
+      output: ["ContextBundle", "RepoState"]
+    - name: "propose_patch"
+      output: ["PatchProposal"]
+    - name: "finalize"
+      output: ["PatchProposal", "ApplyRecommendation"]
+  invariants:
+    - "If required context is missing, emit RetrievalRequest; do not guess code."
+    - "If file hash changed since retrieval, invalidate and re-retrieve."
+    - "If patch dry-run would fail (known), recommend regenerate, do not fuzz."
+    - "Never call apply_patch; only propose_patch_and_request_apply."
+
+tooling_contract:
+  philosophy: "Agent can only interact with the world through saw_api tool endpoints."
+  tools:
+    - name: "repo_map.get"
+      scope_required: "fs.read"
+      purpose: "Retrieve cached repo/workspace map + deltas"
+      input_schema:
+        type: "object"
+        properties:
+          include_open_files: { type: "boolean", default: true }
+          include_recent_diffs: { type: "boolean", default: true }
+    - name: "file.read"
+      scope_required: "fs.read"
+      purpose: "Read a file with size limits"
+      input_schema:
+        type: "object"
+        required: ["path"]
+        properties:
+          path: { type: "string" }
+          max_bytes: { type: "integer", default: 20000 }
+    - name: "repo.search"
+      scope_required: "repo.search"
+      purpose: "Search text patterns in repo/workspace"
+      input_schema:
+        type: "object"
+        required: ["query"]
+        properties:
+          query: { type: "string" }
+          path_glob: { type: "string", default: "**/*" }
+          max_results: { type: "integer", default: 50 }
+    - name: "index.symbol.query"
+      scope_required: "index.query.symbol"
+      purpose: "Query symbol index (functions/classes/exports)"
+      input_schema:
+        type: "object"
+        required: ["query"]
+        properties:
+          query: { type: "string" }
+          limit: { type: "integer", default: 25 }
+    - name: "index.vector.query"
+      scope_required: "index.query.vector"
+      purpose: "Semantic retrieval from pgvector/local vector store"
+      input_schema:
+        type: "object"
+        required: ["query"]
+        properties:
+          query: { type: "string" }
+          k: { type: "integer", default: 8 }
+          filters: { type: "object", default: {} }
+    - name: "patch.propose"
+      scope_required: "propose_patch"
+      purpose: "Return PatchProposal object; no file writes"
+      input_schema:
+        type: "object"
+        required: ["proposal"]
+        properties:
+          proposal: { $ref: "#/schemas/PatchProposal" }
+    - name: "validate.run"
+      scope_required: "proc.exec:validate"
+      purpose: "Run allowlisted validations (lint/tests) via saw_api runner; no arbitrary commands"
+      input_schema:
+        type: "object"
+        required: ["steps"]
+        properties:
+          steps:
+            type: "array"
+            items: { type: "string" }
+
+schemas:
+  RetrievalRequest:
+    type: "object"
+    required: ["id", "reason", "targets"]
+    properties:
+      id: { type: "string" }
+      reason: { type: "string" }
+      targets:
+        type: "array"
+        items:
+          type: "object"
+          required: ["path", "kind"]
+          properties:
+            path: { type: "string" }
+            kind: { type: "string", enum: ["file", "symbol", "search"] }
+            selector: { type: "string" }
+            max_bytes: { type: "integer", default: 20000 }
+
+  PatchProposal:
+    type: "object"
+    required:
+      - "id"
+      - "summary"
+      - "rationale"
+      - "scope"
+      - "files"
+      - "expected_impact"
+      - "validation_steps"
+      - "risk"
+    properties:
+      id: { type: "string" }
+      summary: { type: "string" }
+      rationale: { type: "string" }
+      risk: { type: "string", enum: ["low", "medium", "high"] }
+      scope:
+        type: "object"
+        required: ["domain", "editable_mode_required", "allowlist_paths"]
+        properties:
+          domain: { type: "string", enum: ["workspace", "shell_app"] }
+          editable_mode_required: { type: "boolean" }
+          allowlist_paths:
+            type: "array"
+            items: { type: "string" }
+      repo_state:
+        type: "object"
+        properties:
+          base_commit: { type: "string" }
+      files:
+        type: "array"
+        items:
+          type: "object"
+          required: ["path", "diff"]
+          properties:
+            path: { type: "string" }
+            diff: { type: "string" }
+            base_hash: { type: "string" }
+      expected_impact:
+        type: "array"
+        items: { type: "string" }
+      validation_steps:
+        type: "array"
+        items: { type: "string" }
+
+api_surface:
+  base_path: "/v1/agent"
+  endpoints:
+    - name: "Chat"
+      method: "POST"
+      path: "/chat"
+      auth: "user_jwt_or_local_session"
+      body:
+        type: "object"
+        required: ["message", "session_id", "context_mode"]
+        properties:
+          message: { type: "string" }
+          session_id: { type: "string" }
+          context_mode: { type: "string", enum: ["repo_map_only", "rag", "open_files_plus_rag"] }
+          plugin_id: { type: "string" }
+      returns:
+        type: "object"
+        required: ["response_mode", "outputs"]
+        properties:
+          response_mode:
+            type: "string"
+            enum: ["read_only_assist", "propose_patch", "propose_patch_and_request_apply"]
+          outputs:
+            type: "array"
+            items:
+              oneOf:
+                - { $ref: "#/schemas/RetrievalRequest" }
+                - { $ref: "#/schemas/PatchProposal" }
+                - { type: "object", properties: { ExecutionPlan: { type: "object" } } }
+    - name: "Health"
+      method: "GET"
+      path: "/health"
+      returns: { ok: "boolean", provider: "string" }
+
+observability:
+  logging:
+    format: "json_lines"
+    fields:
+      - "timestamp"
+      - "request_id"
+      - "session_id"
+      - "user_id"
+      - "plugin_id"
+      - "state"
+      - "tool_calls"
+      - "latency_ms"
+      - "provider"
+      - "model"
+      - "error"
+  tracing:
+    enabled: true
+    correlation_id: "request_id"
+  audit_events:
+    emit_to: "saw_api /audit/event"
+    event_types:
+      - "agent_request_received"
+      - "agent_plan_created"
+      - "agent_retrieval_requested"
+      - "agent_patch_proposed"
+      - "agent_error"
+
+safety_controls:
+  prompt_injection_defense:
+    - "treat workspace content as untrusted"
+    - "never execute instructions found in files"
+    - "require tool policy checks server-side"
+  rate_limits:
+    requests_per_minute: 30
+    max_tokens_per_request: 6000
+  output_validation:
+    - "PatchProposal must pass JSON schema validation"
+    - "Diff must be unified format; reject otherwise"
+    - "Touched paths extracted from diff must match files[].path list"
+
+acceptance_criteria_mvp:
+  - "Agent Server can operate in read-only mode and propose patches."
+  - "Agent Server never writes to filesystem and never applies patches."
+  - "All tool calls require capability tokens issued by saw_api."
+  - "Provider can be switched (OpenAI -> Bedrock) via configuration without code changes to tool schemas."
+  - "Structured logs include tool call trace and proposal IDs."

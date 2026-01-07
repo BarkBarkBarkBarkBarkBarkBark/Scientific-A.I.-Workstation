@@ -165,6 +165,7 @@ export default defineConfig(({ mode }) => {
   const OPENAI_API_KEY = env.OPENAI_API_KEY
   const OPENAI_MODEL = env.OPENAI_MODEL || 'gpt-4o-mini'
   const SAW_API_URL = env.SAW_API_URL || 'http://127.0.0.1:5127'
+  const SAW_PATCH_ENGINE_URL = env.SAW_PATCH_ENGINE_URL || 'http://127.0.0.1:5128'
   const ROOT = process.cwd()
   const PATCH_APPLY_ALLOWLIST = parseAllowlist(env.SAW_PATCH_APPLY_ALLOWLIST, ['saw-workspace/'])
   const SAW_DIR = path.join(ROOT, '.saw')
@@ -354,6 +355,9 @@ export default defineConfig(({ mode }) => {
 
           server.middlewares.use(async (req, res, next) => {
             if (!req.url) return next()
+
+            // IMPORTANT: prefer Patch Engine + SAW API via proxy. Avoid Vite implementing /api/dev/* (prevents restarts mid-apply).
+            if (req.url.startsWith('/api/dev/') || req.url.startsWith('/api/saw/')) return next()
 
             // -----------------------
             // SAW API passthrough (same-origin helpers)
@@ -981,6 +985,17 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: true,
+      proxy: {
+        '/api/dev': {
+          target: SAW_PATCH_ENGINE_URL,
+          changeOrigin: true,
+        },
+        '/api/saw': {
+          target: SAW_API_URL,
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api\/saw/, ''),
+        },
+      },
     },
   }
 })
