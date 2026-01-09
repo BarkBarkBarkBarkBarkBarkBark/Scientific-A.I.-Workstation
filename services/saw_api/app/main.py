@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+import re
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pgvector.psycopg import Vector
+import yaml
 
 from .db import db_conn, jsonable, jsonb, sha256_text
 from .embeddings import chunk_text, embed_texts
@@ -20,6 +22,12 @@ from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
 from .agent import agent_chat, agent_approve
 from .agent_log import agent_log_path
+from .stock_plugins_catalog import (
+    compute_dir_digest_sha256,
+    load_stock_catalog,
+    sync_stock_plugin_dir,
+    sync_stock_plugins,
+)
 
 
 settings = get_settings()
@@ -39,6 +47,7 @@ def _startup() -> None:
     # Best-effort: write db.json and auto-init schema (idempotent).
     try:
         bootstrap(settings)
+        sync_stock_plugins(settings)
         startup_recover(settings)
     except Exception:
         # Don't fail API startup in dev; endpoints can still be used to debug.
@@ -315,6 +324,38 @@ def embed_upsert(req: EmbedUpsertRequest) -> EmbedUpsertResponse:
         raise HTTPException(status_code=500, detail=f"embed_upsert_failed: {type(e).__name__}: {e}")
 
 
+@app.post("/files/upload_audio_wav")
+async def files_upload_audio_wav(file: UploadFile = File(...)) -> dict[str, Any]:
+    """
+    Upload a WAV file into:
+      <saw-workspace>/.saw/uploads/
+
+    Returns:
+      { ok, path } where path is workspace-relative (e.g. ".saw/uploads/xyz.wav").
+    """
+    try:
+        name = str(file.filename or "audio.wav")
+        # keep only the basename, avoid traversal
+        name = name.replace("\\", "/").split("/")[-1]
+        if not name.lower().endswith(".wav"):
+            name = name + ".wav"
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._")
+        if not safe:
+            safe = "audio.wav"
+        out_dir = os.path.join(settings.workspace_root, ".saw", "uploads")
+        os.makedirs(out_dir, exist_ok=True)
+        # include timestamp to avoid collisions
+        out_name = f"{int(datetime.utcnow().timestamp() * 1000)}_{safe}"
+        abs_path = os.path.join(out_dir, out_name)
+        data = await file.read()
+        with open(abs_path, "wb") as f:
+            f.write(data)
+        rel_path = os.path.relpath(abs_path, settings.workspace_root).replace("\\", "/")
+        return {"ok": True, "path": rel_path, "bytes": len(data)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"upload_failed: {e}")
+
+
 class VectorSearchRequest(BaseModel):
     query: str
     top_k: int = 8
@@ -469,6 +510,9 @@ class PluginListItem(BaseModel):
     description: str
     category_path: str
     plugin_dir_rel: str
+    locked: bool = False
+    origin: Literal["stock", "dev"] = "dev"
+    integrity: dict[str, Any] | None = None
     inputs: list[dict[str, Any]] = Field(default_factory=list)
     outputs: list[dict[str, Any]] = Field(default_factory=list)
     parameters: list[dict[str, Any]] = Field(default_factory=list)
@@ -484,14 +528,17 @@ def plugins_list() -> PluginListResponse:
     try:
         items = []
         repo_root = os.path.abspath(os.path.join(settings.workspace_root, ".."))
+        stock = load_stock_catalog()
         for p in discover_plugins(settings):
             m = p.manifest
             parts = [x for x in (m.id or "").split(".") if x]
-            category_path = "workspace/runtime"
-            if len(parts) >= 2:
-                category_path = f"workspace/{parts[0]}/{parts[1]}"
-            elif len(parts) == 1:
-                category_path = f"workspace/{parts[0]}"
+            category_path = str(m.category_path or "").strip()
+            if not category_path:
+                category_path = "workspace/runtime"
+                if len(parts) >= 2:
+                    category_path = f"workspace/{parts[0]}/{parts[1]}"
+                elif len(parts) == 1:
+                    category_path = f"workspace/{parts[0]}"
 
             plugin_dir_rel = os.path.relpath(p.plugin_dir, repo_root).replace("\\", "/")
             inputs = [{"id": k, "name": k, "type": v.type} for (k, v) in (m.inputs or {}).items()]
@@ -515,6 +562,27 @@ def plugins_list() -> PluginListResponse:
                     }
                 )
 
+            locked = bool(m.id in stock)
+            origin: Literal["stock", "dev"] = "stock" if locked else "dev"
+            integrity: dict[str, Any] | None = None
+            if locked:
+                expected = stock[m.id].digest_sha256
+                actual = ""
+                restored = False
+                try:
+                    actual = compute_dir_digest_sha256(p.plugin_dir)
+                except Exception:
+                    actual = ""
+                if actual != expected:
+                    # Self-heal: restore the canonical stock plugin.
+                    sync_stock_plugin_dir(stock[m.id].canonical_dir, p.plugin_dir)
+                    restored = True
+                    try:
+                        actual = compute_dir_digest_sha256(p.plugin_dir)
+                    except Exception:
+                        actual = ""
+                integrity = {"expected": expected, "actual": actual, "restored": restored}
+
             items.append(
                 PluginListItem(
                     id=m.id,
@@ -523,6 +591,9 @@ def plugins_list() -> PluginListResponse:
                     description=m.description,
                     category_path=category_path,
                     plugin_dir_rel=plugin_dir_rel,
+                    locked=locked,
+                    origin=origin,
+                    integrity=integrity,
                     inputs=inputs,
                     outputs=outputs,
                     parameters=parameters,
@@ -546,6 +617,60 @@ class PluginExecuteResponse(BaseModel):
     logs: list[dict[str, Any]]
 
 
+class PluginForkRequest(BaseModel):
+    from_plugin_id: str
+    new_plugin_id: str
+    new_name: str | None = None
+
+
+class PluginForkResponse(BaseModel):
+    ok: bool
+    from_plugin_id: str
+    new_plugin_id: str
+    plugin_dir: str
+
+
+@app.post("/plugins/fork", response_model=PluginForkResponse)
+def plugins_fork(req: PluginForkRequest) -> PluginForkResponse:
+    src_id = (req.from_plugin_id or "").strip()
+    new_id = (req.new_plugin_id or "").strip()
+    if not src_id or not new_id:
+        raise HTTPException(status_code=400, detail="missing_plugin_id")
+
+    # Reject path separators / traversal; keep ids filename-safe.
+    if not re.match(r"^[A-Za-z0-9_.-]+$", new_id):
+        raise HTTPException(status_code=400, detail="invalid_new_plugin_id")
+
+    stock = load_stock_catalog()
+    src = stock.get(src_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="unknown_stock_plugin_id")
+    if new_id in stock:
+        raise HTTPException(status_code=409, detail="new_plugin_id_is_locked")
+
+    dest_dir = os.path.join(settings.workspace_root, "plugins", new_id)
+    if os.path.exists(dest_dir):
+        raise HTTPException(status_code=409, detail="new_plugin_id_already_exists")
+
+    try:
+        sync_stock_plugin_dir(src.canonical_dir, dest_dir)
+        # Rewrite id/name in plugin.yaml
+        manifest_path = os.path.join(dest_dir, "plugin.yaml")
+        raw = yaml.safe_load(open(manifest_path, "r", encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raw = {}
+        old_name = str(raw.get("name") or src_id)
+        raw["id"] = new_id
+        raw["name"] = str(req.new_name).strip() if isinstance(req.new_name, str) and req.new_name.strip() else f"{old_name} (Fork)"
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+        return PluginForkResponse(ok=True, from_plugin_id=src_id, new_plugin_id=new_id, plugin_dir=dest_dir)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"plugin_fork_failed: {e}")
+
+
 @app.post("/plugins/execute", response_model=PluginExecuteResponse)
 def plugins_execute(req: PluginExecuteRequest) -> PluginExecuteResponse:
     pid = (req.plugin_id or "").strip()
@@ -556,6 +681,16 @@ def plugins_execute(req: PluginExecuteRequest) -> PluginExecuteResponse:
     if not plugin:
         raise HTTPException(status_code=404, detail="unknown_plugin_id")
     try:
+        stock = load_stock_catalog()
+        if pid in stock:
+            expected = stock[pid].digest_sha256
+            actual = ""
+            try:
+                actual = compute_dir_digest_sha256(plugin.plugin_dir)
+            except Exception:
+                actual = ""
+            if actual != expected:
+                sync_stock_plugin_dir(stock[pid].canonical_dir, plugin.plugin_dir)
         r = execute_plugin(settings, plugin, inputs=req.inputs, params=req.params)
         return PluginExecuteResponse(
             ok=bool(r.get("ok", True)),
@@ -592,6 +727,16 @@ def api_plugin_run(plugin_id: str, req: PluginRunRequest) -> PluginRunResponse:
         raise HTTPException(status_code=404, detail="unknown_plugin_id")
 
     try:
+        stock = load_stock_catalog()
+        if pid in stock:
+            expected = stock[pid].digest_sha256
+            actual = ""
+            try:
+                actual = compute_dir_digest_sha256(plugin.plugin_dir)
+            except Exception:
+                actual = ""
+            if actual != expected:
+                sync_stock_plugin_dir(stock[pid].canonical_dir, plugin.plugin_dir)
         rs = spawn_run(
             settings,
             plugin_id=plugin.manifest.id,

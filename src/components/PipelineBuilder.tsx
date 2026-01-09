@@ -47,13 +47,12 @@ export function PipelineBuilder() {
   const setSelectedNodeId = useSawStore((s) => s.setSelectedNodeId)
   const selectedNodeId = useSawStore((s) => s.selectedNodeId)
   const editableMode = useSawStore((s) => s.editableMode)
-  const openEditor = useSawStore((s) => s.openEditor)
+  const openFullscreen = useSawStore((s) => s.openFullscreen)
 
   const addNodeFromPluginAtIndex = useSawStore((s) => s.addNodeFromPluginAtIndex)
   const moveNodeInPipeline = useSawStore((s) => s.moveNodeInPipeline)
   const deleteNode = useSawStore((s) => s.deleteNode)
   const setNodeViewHeight = useSawStore((s) => s.setNodeViewHeight)
-  const openFullscreen = useSawStore((s) => s.openFullscreen)
   const pluginCatalog = useSawStore((s) => s.pluginCatalog)
 
   const [activeDropIndex, setActiveDropIndex] = useState<number | null>(null)
@@ -236,7 +235,7 @@ export function PipelineBuilder() {
                   }}
                   onClick={() => {
                     setSelectedNodeId(n.id)
-                    if (editableMode) openEditor(n.id)
+                    if (editableMode) openFullscreen(n.id)
                   }}
                   className={[
                     'rounded-lg border px-3 py-3',

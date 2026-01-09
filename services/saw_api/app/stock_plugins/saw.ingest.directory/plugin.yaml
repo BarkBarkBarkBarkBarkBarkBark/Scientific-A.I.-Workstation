@@ -1,0 +1,54 @@
+id: "saw.ingest.directory"
+name: "Ingest Directory"
+version: "0.1.0"
+description: "Index text files under saw-workspace/ into the SAW vector DB via /embed/upsert."
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+inputs:
+  directory:
+    type: "path"
+    description: "Relative path inside saw-workspace/ (e.g. '.', 'docs', 'plugins')."
+params:
+  include_ext:
+    type: "string"
+    default: ".md,.txt,.py,.ts,.tsx,.json,.yaml,.yml"
+    ui: { label: "Include extensions (comma-separated)" }
+  max_bytes:
+    type: "number"
+    default: 200000
+    ui: { label: "Max file bytes" }
+  chunk_max_chars:
+    type: "number"
+    default: 4000
+  chunk_overlap_chars:
+    type: "number"
+    default: 300
+  api_url:
+    type: "string"
+    default: "http://127.0.0.1:5127"
+    ui: { label: "SAW API URL" }
+  query:
+    type: "string"
+    default: ""
+    ui: { label: "Optional query (run vector search after ingest)" }
+  top_k:
+    type: "number"
+    default: 8
+outputs:
+  report:
+    type: "object"
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: "allowed"
+  disk: "read_only"
+  subprocess: "forbidden"
+resources:
+  gpu: "forbidden"
+  threads: 1
+
+

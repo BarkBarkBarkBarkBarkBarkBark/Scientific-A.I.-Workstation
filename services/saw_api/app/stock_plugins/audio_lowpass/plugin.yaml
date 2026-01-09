@@ -1,0 +1,36 @@
+id: "audio_lowpass"
+name: "Audio Lowpass"
+version: "0.1.0"
+description: "Upload an MP3, apply a lowpass filter, and preview the waveform (runtime plugin)."
+category_path: "audio/processors"
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+  pip:
+    - "numpy>=1.26"
+inputs:
+  wav_path:
+    type: "path"
+    description: "Workspace-relative path to a WAV file (uploaded via SAW API)."
+params:
+  cutoff_hz:
+    type: "number"
+    default: 1200
+    ui: { label: "Cutoff (Hz)" }
+outputs:
+  audio:
+    type: "AudioPCM"
+execution:
+  deterministic: true
+  cacheable: false
+side_effects:
+  network: "none"
+  disk: "read_only"
+  subprocess: "forbidden"
+resources:
+  gpu: "forbidden"
+  threads: 1
+
+

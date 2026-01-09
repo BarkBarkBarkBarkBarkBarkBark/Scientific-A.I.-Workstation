@@ -24,31 +24,17 @@ function scorePlugin(goal: string, p: PluginDefinition): number {
   hit('predict', 4)
   hit('plot', 3)
   hit('visual', 3)
+  hit('audio', 3)
   return s
 }
 
-export function generateAiPlan(goal: string, plugins: PluginDefinition[]): AiPlan {
-  const scored = [...plugins]
-    .map((p) => ({ p, s: scorePlugin(goal, p) }))
-    .sort((a, b) => b.s - a.s)
-
+export function generatePlanFallback(goal: string, plugins: PluginDefinition[]): AiPlan {
+  const scored = [...plugins].map((p) => ({ p, s: scorePlugin(goal, p) })).sort((a, b) => b.s - a.s)
   const top = scored.filter((x) => x.s > 0).slice(0, 6).map((x) => x.p.id)
 
-  // Reasonable default pipeline if goal is vague
-  const fallback = [
-    'load_csv',
-    'filter_rows',
-    'normalize',
-    'pca',
-    'plot_scatter',
-  ]
-
+  const fallback = ['load_csv', 'filter_rows', 'normalize', 'pca', 'plot_scatter']
   const suggestedPlugins = top.length >= 3 ? top : fallback
-
-  // Connect sequentially (we'll type-check later when wiring nodes).
-  const connections = suggestedPlugins
-    .slice(0, -1)
-    .map((id, i) => ({ fromPluginId: id, toPluginId: suggestedPlugins[i + 1] }))
+  const connections = suggestedPlugins.slice(0, -1).map((id, i) => ({ fromPluginId: id, toPluginId: suggestedPlugins[i + 1] }))
 
   return {
     summary: `Goal: "${goal}"\nSuggested pipeline: ${suggestedPlugins.join(' → ')}`,
@@ -58,13 +44,12 @@ export function generateAiPlan(goal: string, plugins: PluginDefinition[]): AiPla
       'Start with ingestion + basic QC.',
       'Add normalization before dimensionality reduction.',
       'If you see unstable results, inspect upstream filters and column selection.',
-      'Enable Editable Mode to open the mock code editor and review generated diffs.',
     ],
     logs: [
       '[planner] parsing goal...',
       `[planner] matched ${top.length} plugins`,
       `[planner] proposed ${suggestedPlugins.length} nodes`,
-      '[planner] ready to apply plan (mock)',
+      '[planner] ready to apply plan (local fallback)',
     ],
     errors: [],
   }

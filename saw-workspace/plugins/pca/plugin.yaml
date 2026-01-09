@@ -1,0 +1,35 @@
+id: "pca"
+name: "PCA"
+version: "2.0.0"
+description: "Dimensionality reduction using PCA (SVD)."
+category_path: "neural/processors"
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+  pip:
+    - "numpy>=1.26"
+inputs:
+  df:
+    type: "table"
+params:
+  n_components:
+    type: "number"
+    default: 2
+    ui: { label: "Components" }
+outputs:
+  emb:
+    type: "embedding"
+execution:
+  deterministic: true
+  cacheable: true
+side_effects:
+  network: "none"
+  disk: "read_only"
+  subprocess: "forbidden"
+resources:
+  gpu: "forbidden"
+  threads: 1
+
+

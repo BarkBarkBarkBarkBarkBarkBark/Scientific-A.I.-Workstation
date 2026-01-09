@@ -1,3 +1,7 @@
 - [x] go to bed
 - [x] make dinner
 - [ ] put away laundry 
+- [ ] do a flip
+- [ ] make plugin browser default to collapsed view
+- [ ] make dev view collapsed by default
+- [ ] make ui sections re-sizable

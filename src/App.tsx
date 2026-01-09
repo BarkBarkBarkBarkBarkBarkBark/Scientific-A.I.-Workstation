@@ -4,7 +4,6 @@ import { NodeCanvas } from './components/NodeCanvas'
 import { Inspector } from './components/Inspector'
 import { BottomPanel } from './components/BottomPanel'
 import { GoalBox } from './components/GoalBox'
-import { CodeEditorModal } from './components/CodeEditorModal'
 import { useEffect, useState } from 'react'
 import { useSawStore } from './store/useSawStore'
 import { ResizableDivider } from './components/ui/ResizableDivider'
@@ -123,7 +122,6 @@ export function App() {
         <BottomPanel />
       </div>
 
-      <CodeEditorModal />
       <ModuleFullscreenModal />
       <ConsoleFullscreenModal />
       <PatchReviewModal />

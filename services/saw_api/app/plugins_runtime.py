@@ -61,6 +61,9 @@ class PluginManifest(BaseModel):
     name: str
     version: str
     description: str
+    category_path: str | None = None
+    # Optional: allows future manifests to declare intent. Lock enforcement is still server-side.
+    locked: bool | None = None
     entrypoint: Entrypoint
     environment: EnvironmentSpec
     inputs: dict[str, IoSpec]

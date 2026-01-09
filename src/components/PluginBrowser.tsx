@@ -102,7 +102,18 @@ export function PluginBrowser() {
                     title={layout.leftCollapsed ? 'Expand sidebar to drag' : 'Drag to canvas / drop zones'}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-zinc-100">{p.name}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold text-zinc-100">{p.name}</div>
+                        {p.locked ? (
+                          <div className="rounded bg-amber-900/30 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
+                            LOCKED
+                          </div>
+                        ) : p.origin === 'dev' ? (
+                          <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
+                            dev
+                          </div>
+                        ) : null}
+                      </div>
                       <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
                         v{p.version}
                       </div>
@@ -218,7 +229,18 @@ export function PluginBrowser() {
                   title="Drag to canvas / drop zones"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-zinc-100">{p.name}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-semibold text-zinc-100">{p.name}</div>
+                      {p.locked ? (
+                        <div className="rounded bg-amber-900/30 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
+                          LOCKED
+                        </div>
+                      ) : p.origin === 'dev' ? (
+                        <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
+                          dev
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
                       v{p.version}
                     </div>

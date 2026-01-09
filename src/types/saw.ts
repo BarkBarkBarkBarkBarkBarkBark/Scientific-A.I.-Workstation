@@ -33,6 +33,12 @@ export type PluginDefinition = {
    * These paths are used for in-GUI "Source" viewing.
    */
   sourcePaths?: string[]
+  /**
+   * Workspace/runtime metadata (provided by SAW API for discovered plugins).
+   */
+  locked?: boolean
+  origin?: 'stock' | 'dev'
+  integrity?: { expected: string; actual: string; restored: boolean } | null
   inputs: Port[]
   outputs: Port[]
   parameters: PluginParameterDefinition[]
@@ -54,6 +60,7 @@ export type GitPreview = {
 
 export type AudioRuntime = {
   fileName: string | null
+  uploadedWavPath?: string | null
   original: AudioBuffer | null
   filtered: AudioBuffer | null
   lastError: string | null

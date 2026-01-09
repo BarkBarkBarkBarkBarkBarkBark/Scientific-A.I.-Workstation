@@ -13,7 +13,6 @@ export function ModuleFullscreenModal() {
   const fullscreen = useSawStore((s) => s.fullscreen)
   const closeFullscreen = useSawStore((s) => s.closeFullscreen)
   const editableMode = useSawStore((s) => s.editableMode)
-  const updateNodeCode = useSawStore((s) => s.updateNodeCode)
   const pluginCatalog = useSawStore((s) => s.pluginCatalog)
 
   const node = useSawStore((s) => s.nodes.find((n) => n.id === fullscreen.nodeId) ?? null)
@@ -22,6 +21,8 @@ export function ModuleFullscreenModal() {
     [node, pluginCatalog],
   )
   const [codeTab, setCodeTab] = useState<'source' | 'python'>('source')
+  const refreshWorkspacePlugins = useSawStore((s) => s.refreshWorkspacePlugins)
+  const [forkStatus, setForkStatus] = useState<string>('')
 
   useEffect(() => {
     if (!fullscreen.open) return
@@ -37,6 +38,7 @@ export function ModuleFullscreenModal() {
   const manifestPath = (plugin.sourcePaths ?? []).find((p) => p.endsWith('/plugin.yaml') || p.endsWith('/plugin.yml')) ?? ''
   const wrapperPath = (plugin.sourcePaths ?? []).find((p) => p.endsWith('/wrapper.py')) ?? ''
   const isWorkspacePlugin = Boolean(manifestPath && wrapperPath)
+  const isLockedStock = Boolean(isWorkspacePlugin && plugin.locked && plugin.origin === 'stock')
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/70 p-4">
@@ -109,9 +111,51 @@ export function ModuleFullscreenModal() {
                     {isWorkspacePlugin ? 'Wrapper (Python)' : 'Python (mock)'}
                   </button>
                   <div className="ml-auto text-[11px] text-zinc-500">
-                    {isWorkspacePlugin ? 'read-only' : codeTab === 'python' ? (editableMode ? 'editable' : 'read-only') : 'read-only'}
+                    {isWorkspacePlugin ? (
+                      <span className="flex items-center gap-2">
+                        {isLockedStock ? (
+                          <span className="rounded bg-amber-900/30 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
+                            LOCKED
+                          </span>
+                        ) : null}
+                        <span>read-only</span>
+                      </span>
+                    ) : codeTab === 'python' ? (
+                      editableMode ? 'editable' : 'read-only'
+                    ) : (
+                      'read-only'
+                    )}
                   </div>
+                  {isLockedStock ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const suggested = `${plugin.id}.dev`
+                          const newId = window.prompt('Fork as new plugin id:', suggested) || ''
+                          const trimmed = newId.trim()
+                          if (!trimmed) return
+                          setForkStatus('forking…')
+                          const r = await fetch('/api/saw/plugins/fork', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ from_plugin_id: plugin.id, new_plugin_id: trimmed }),
+                          })
+                          if (!r.ok) throw new Error(await r.text())
+                          setForkStatus(`forked: ${trimmed}`)
+                          await refreshWorkspacePlugins()
+                        } catch (e: any) {
+                          setForkStatus(`fork failed: ${String(e?.message ?? e)}`)
+                        }
+                      }}
+                      className="rounded-md border border-amber-700/50 bg-amber-900/20 px-2 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-900/30"
+                      title="Create an editable copy with a new plugin id (keeps the stock plugin locked)"
+                    >
+                      Fork…
+                    </button>
+                  ) : null}
                 </div>
+                {forkStatus ? <div className="text-[11px] text-zinc-500">{forkStatus}</div> : null}
 
                 <div className="min-h-0 flex-1">
                   {isWorkspacePlugin ? (
@@ -130,8 +174,8 @@ export function ModuleFullscreenModal() {
                         theme="vs-dark"
                         value={node.data.code}
                         onChange={(v) => {
-                          if (!editableMode) return
-                          updateNodeCode(node.id, v ?? '')
+                          // legacy placeholder; node code editing removed
+                          void v
                         }}
                         options={{
                           readOnly: !editableMode,

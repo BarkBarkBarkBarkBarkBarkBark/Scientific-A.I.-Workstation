@@ -1,0 +1,41 @@
+id: "train_classifier"
+name: "Train Classifier"
+version: "0.3.0"
+description: "Train a simple centroid classifier on embeddings."
+category_path: "neural/processors"
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+  pip:
+    - "numpy>=1.26"
+inputs:
+  x:
+    type: "embedding"
+  y:
+    type: "labels"
+params:
+  algo:
+    type: "string"
+    default: "logreg"
+    ui: { label: "Algorithm" }
+  seed:
+    type: "number"
+    default: 42
+    ui: { label: "Seed" }
+outputs:
+  model:
+    type: "model"
+execution:
+  deterministic: true
+  cacheable: true
+side_effects:
+  network: "none"
+  disk: "read_only"
+  subprocess: "forbidden"
+resources:
+  gpu: "forbidden"
+  threads: 1
+
+

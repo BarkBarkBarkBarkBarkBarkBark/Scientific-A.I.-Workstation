@@ -1,0 +1,35 @@
+id: "load_csv"
+name: "Load CSV"
+version: "1.0.0"
+description: "Load a CSV file into a table object."
+category_path: "data/io"
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+inputs: {}
+params:
+  path:
+    type: "string"
+    default: "data/experiment.csv"
+    ui: { label: "Path" }
+  delimiter:
+    type: "string"
+    default: ","
+    ui: { label: "Delimiter" }
+outputs:
+  df:
+    type: "table"
+execution:
+  deterministic: true
+  cacheable: true
+side_effects:
+  network: "none"
+  disk: "read_only"
+  subprocess: "forbidden"
+resources:
+  gpu: "forbidden"
+  threads: 1
+
+

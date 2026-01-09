@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 import uuid
+from functools import lru_cache
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -38,6 +39,61 @@ PATCH_APPLY_ALLOWLIST = _parse_allowlist(os.environ.get("SAW_PATCH_APPLY_ALLOWLI
 CAPS_PATH = os.path.join(SAW_DIR, "caps.json")
 SESSION_LOG = os.path.join(SAW_DIR, "session.ndjson")
 RECOVERY_PATH = os.path.join(SAW_DIR, "recovery.json")
+
+
+@lru_cache(maxsize=1)
+def _stock_plugin_ids() -> set[str]:
+    """
+    Detect stock (locked) plugin ids by scanning the SAW API canonical directory:
+      services/saw_api/app/stock_plugins/<plugin_id>/plugin.yaml
+
+    Note: Patch Engine is intentionally YAML-free; we treat folder names as ids.
+    """
+    root = os.path.join(ROOT, "services", "saw_api", "app", "stock_plugins")
+    out: set[str] = set()
+    try:
+        for ent in os.listdir(root):
+            if ent.startswith("."):
+                continue
+            pdir = os.path.join(root, ent)
+            if not os.path.isdir(pdir):
+                continue
+            if os.path.isfile(os.path.join(pdir, "plugin.yaml")):
+                out.add(ent)
+    except Exception:
+        return set()
+    return out
+
+
+def _locked_plugin_id_for_rel_path(rel_path: str) -> str | None:
+    p = str(rel_path or "").replace("\\", "/")
+    if not p.startswith("saw-workspace/plugins/"):
+        return None
+    parts = [x for x in p.split("/") if x]
+    # saw-workspace/plugins/<plugin_id>/...
+    if len(parts) < 3:
+        return None
+    pid = parts[2]
+    return pid if pid in _stock_plugin_ids() else None
+
+
+def _guard_locked_plugin_write(rel_path: str, op: str) -> None:
+    if _truthy(os.environ.get("SAW_ALLOW_WRITE_LOCKED_PLUGINS", "0")):
+        return
+    pid = _locked_plugin_id_for_rel_path(rel_path)
+    if not pid:
+        return
+    append_session({"type": "locked_plugin.block", "path": rel_path, "plugin_id": pid, "op": op})
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "error": "locked_plugin",
+            "op": op,
+            "path": rel_path,
+            "plugin_id": pid,
+            "hint": "Set SAW_ALLOW_WRITE_LOCKED_PLUGINS=1 to override (power users only).",
+        },
+    )
 
 # Debug-mode forensic log.
 # IMPORTANT: default to a gitignored location under .saw/ so we don't dirty the repo and break stashing.
@@ -844,6 +900,8 @@ def safe_write(body: SafeWriteRequest) -> dict[str, Any]:
         append_session({"type": "safe.write.forbidden", "path": rel})
         raise HTTPException(status_code=403, detail={"error": "forbidden", "op": "safe_write", "path": rel})
 
+    _guard_locked_plugin_write(rel, op="safe_write")
+
     pre_head = git_head()
     dirty_paths = git_dirty_paths()
     overlap = _dirty_overlap_list(dirty_paths=dirty_paths, targets=[rel])
@@ -919,6 +977,8 @@ def safe_delete(body: SafeDeleteRequest) -> dict[str, Any]:
     if not caps.d:
         append_session({"type": "safe.delete.forbidden", "path": rel})
         raise HTTPException(status_code=403, detail={"error": "forbidden", "op": "safe_delete", "path": rel})
+
+    _guard_locked_plugin_write(rel, op="safe_delete")
 
     pre_head = git_head()
     dirty_paths = git_dirty_paths()
@@ -1002,6 +1062,11 @@ def safe_apply_patch(body: ApplyPatchRequest) -> dict[str, Any]:
         if not is_allowed_by_prefixes(p, PATCH_APPLY_ALLOWLIST):
             append_session({"type": "safe.patch.reject", "reason": "path_not_allowed", "path": p, "allowlist": PATCH_APPLY_ALLOWLIST})
             raise HTTPException(status_code=403, detail={"error": "path_not_allowed", "path": p, "allowlist": PATCH_APPLY_ALLOWLIST})
+
+    for p in parsed["touched"]:
+        _guard_locked_plugin_write(p, op="safe_apply_patch_write")
+    for p in parsed["deleted"]:
+        _guard_locked_plugin_write(p, op="safe_apply_patch_delete")
 
     manifest = load_caps()
     for p in parsed["touched"]:

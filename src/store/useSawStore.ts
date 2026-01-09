@@ -12,23 +12,16 @@ import {
 } from 'reactflow'
 import type { PluginNode, PluginNodeData } from '../types/saw'
 import type { PluginDefinition } from '../types/saw'
-import { plugins as builtinPlugins } from '../mock/plugins'
-import { generateAiPlan } from '../mock/ai'
-import { makeMockCode, makeMockCodeIndex, makeMockGitPreview } from '../mock/codegen'
+import { generatePlanFallback } from '../ai/planFallback'
 import { approveAgentTool, getAiStatus, requestAgentChat, requestAiPlan, type AgentToolCall, type ChatMessage } from '../ai/client'
 import type { AiStatus } from '../types/ai'
-import { decodeAudioFile, renderLowpass } from '../audio/webaudio'
+import { audioBufferFromPcm, decodeAudioFile, encodeWavFromAudioBuffer } from '../audio/webaudio'
 import { sourceFiles } from '../dev/sourceFiles'
 import type { PatchProposal } from '../types/patch'
 import { parsePatchProposalFromAssistant } from '../patching/parsePatchProposal'
 import { fetchWorkspacePlugins } from '../plugins/workspace'
 
 type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo'
-
-type EditorState = {
-  open: boolean
-  nodeId: string | null
-}
 
 type FullscreenState = {
   open: boolean
@@ -42,7 +35,6 @@ type SawState = {
   edges: Edge[]
   selectedNodeId: string | null
   editableMode: boolean
-  editor: EditorState
   fullscreen: FullscreenState
   bottomTab: BottomTab
   goalText: string
@@ -79,9 +71,6 @@ type SawState = {
   isValidConnection: (c: Connection) => boolean
   tryAddEdge: (c: Connection) => void
   updateNodeParam: (nodeId: string, paramId: string, value: string | number) => void
-  openEditor: (nodeId: string) => void
-  closeEditor: () => void
-  updateNodeCode: (nodeId: string, code: string) => void
   openFullscreen: (nodeId: string) => void
   closeFullscreen: () => void
   refreshAiStatus: () => Promise<void>
@@ -129,10 +118,7 @@ function id(prefix = 'n') {
 }
 
 function mergeCatalog(workspace: PluginDefinition[]) {
-  const byId = new Map<string, PluginDefinition>()
-  for (const p of builtinPlugins) byId.set(p.id, p)
-  for (const p of workspace) byId.set(p.id, p)
-  return Array.from(byId.values())
+  return [...workspace]
 }
 
 function getPluginFromCatalog(catalog: PluginDefinition[], pluginId: string): PluginDefinition | null {
@@ -162,9 +148,9 @@ function makeNodeData(catalog: PluginDefinition[], pluginId: string): PluginNode
   for (const input of p.inputs) portTypes[`in:${input.id}`] = input.type
   for (const output of p.outputs) portTypes[`out:${output.id}`] = output.type
 
-  const code = makeMockCode(p)
-  const codeIndex = makeMockCodeIndex(p)
-  const git = makeMockGitPreview(code)
+  const code = ''
+  const codeIndex = { classes: [], functions: [] }
+  const git = { base: '', current: '', diff: '', commitMessage: 'SAW: apply patch' }
 
   const data: PluginNodeData = {
     pluginId,
@@ -206,13 +192,12 @@ const _useSawStore = create<SawState>((set, get) => ({
   edges: [],
   selectedNodeId: null,
   editableMode: false,
-  editor: { open: false, nodeId: null },
   fullscreen: { open: false, nodeId: null },
   bottomTab: 'logs',
   goalText: '',
   logs: [
     '[runtime] SAW boot: ok',
-    '[runtime] execution engine: mocked (frontend-only)',
+    '[runtime] execution engine: SAW API plugins',
     '[graph] drag plugins in to build a pipeline',
   ],
   errors: [
@@ -386,8 +371,6 @@ const _useSawStore = create<SawState>((set, get) => ({
       const nextNodes = s.nodes.filter((n) => n.id !== nodeId)
       const nextEdges = s.edges.filter((e) => e.source !== nodeId && e.target !== nodeId)
       const selectedNodeId = s.selectedNodeId === nodeId ? null : s.selectedNodeId
-      const editor =
-        s.editor.nodeId === nodeId ? { open: false, nodeId: null } : s.editor
       const fullscreen =
         s.fullscreen.nodeId === nodeId ? { open: false, nodeId: null } : s.fullscreen
       return {
@@ -395,7 +378,6 @@ const _useSawStore = create<SawState>((set, get) => ({
         nodes: nextNodes,
         edges: nextEdges,
         selectedNodeId,
-        editor,
         fullscreen,
         logs: [...s.logs, `[graph] deleted node ${nodeId}`],
       }
@@ -503,24 +485,8 @@ const _useSawStore = create<SawState>((set, get) => ({
     }
   },
 
-  openEditor: (nodeId) => set({ editor: { open: true, nodeId } }),
-  closeEditor: () => set({ editor: { open: false, nodeId: null } }),
   openFullscreen: (nodeId) => set({ fullscreen: { open: true, nodeId } }),
   closeFullscreen: () => set({ fullscreen: { open: false, nodeId: null } }),
-
-  updateNodeCode: (nodeId, code) => {
-    set((s) => ({
-      nodes: s.nodes.map((n) => {
-        if (n.id !== nodeId) return n
-        const git = {
-          ...n.data.git,
-          current: code,
-          diff: n.data.git.diff,
-        }
-        return { ...n, data: { ...n.data, code, git } }
-      }),
-    }))
-  },
 
   refreshAiStatus: async () => {
     try {
@@ -902,11 +868,11 @@ const _useSawStore = create<SawState>((set, get) => ({
         logs: [...s.logs, ...plan.logs],
       }))
     } catch (e: any) {
-      const fallback = generateAiPlan(goal, get().pluginCatalog)
+      const fallback = generatePlanFallback(goal, get().pluginCatalog)
       plan = fallback
       set((s) => ({
         bottomTab: 'ai',
-        logs: [...s.logs, `[planner] openai unavailable; using mock planner (${String(e?.message ?? e)})`],
+        logs: [...s.logs, `[planner] openai unavailable; using local fallback (${String(e?.message ?? e)})`],
       }))
     } finally {
       set({ aiBusy: false })
@@ -951,6 +917,21 @@ const _useSawStore = create<SawState>((set, get) => ({
     // Decode (real)
     try {
       const original = await decodeAudioFile(file)
+      // Upload a WAV version for runtime execution
+      let uploadedWavPath: string | null = null
+      try {
+        const wav = encodeWavFromAudioBuffer(original)
+        const fd = new FormData()
+        const base = file.name.replace(/\.[^.]+$/, '')
+        fd.append('file', wav, `${base || 'audio'}.wav`)
+        const r = await fetch('/api/saw/files/upload_audio_wav', { method: 'POST', body: fd })
+        if (!r.ok) throw new Error(await r.text())
+        const j = (await r.json()) as { ok: boolean; path: string }
+        uploadedWavPath = String(j.path || '')
+      } catch (e: any) {
+        uploadedWavPath = null
+        set((s) => ({ logs: [...s.logs, `[audio] upload failed: ${String(e?.message ?? e)}`] }))
+      }
       set((s) => ({
         nodes: s.nodes.map((n) => {
           if (n.id !== nodeId) return n
@@ -969,6 +950,7 @@ const _useSawStore = create<SawState>((set, get) => ({
                     lastError: null,
                   }),
                   fileName: file.name,
+                  uploadedWavPath,
                   original,
                   lastError: null,
                 },
@@ -976,7 +958,7 @@ const _useSawStore = create<SawState>((set, get) => ({
             },
           }
         }),
-        logs: [...s.logs, `[audio] decoded "${file.name}"`],
+        logs: [...s.logs, `[audio] decoded "${file.name}"`, ...(uploadedWavPath ? [`[audio] uploaded wav: ${uploadedWavPath}`] : [])],
       }))
       await get().recomputeLowpass(nodeId)
     } catch (e: any) {
@@ -1015,10 +997,26 @@ const _useSawStore = create<SawState>((set, get) => ({
     if (!node || node.data.pluginId !== 'audio_lowpass') return
     const original = node.data.runtime?.audio?.original ?? null
     if (!original) return
+    const uploadedWavPath = node.data.runtime?.audio?.uploadedWavPath ?? null
+    if (!uploadedWavPath) return
 
     const cutoff = Number(node.data.params['cutoff_hz'] ?? 1200)
     try {
-      const filtered = await renderLowpass({ input: original, cutoffHz: cutoff })
+      const r = await fetch('/api/saw/plugins/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plugin_id: 'audio_lowpass',
+          inputs: { wav_path: { data: uploadedWavPath, metadata: {} } },
+          params: { cutoff_hz: cutoff },
+        }),
+      })
+      if (!r.ok) throw new Error(await r.text())
+      const j = (await r.json()) as { ok: boolean; outputs: any; logs?: any[] }
+      const audio = j?.outputs?.audio?.data
+      const sr = Number(audio?.sample_rate_hz ?? original.sampleRate)
+      const samples = (audio?.samples ?? []) as number[][]
+      const filtered = audioBufferFromPcm(samples, sr)
       set((s) => ({
         nodes: s.nodes.map((n) => {
           if (n.id !== nodeId) return n
@@ -1043,7 +1041,7 @@ const _useSawStore = create<SawState>((set, get) => ({
             },
           }
         }),
-        logs: [...s.logs, `[audio] rendered lowpass @ ${Math.round(cutoff)} Hz`],
+        logs: [...s.logs, `[audio] rendered lowpass (runtime) @ ${Math.round(cutoff)} Hz`],
       }))
     } catch (e: any) {
       set((s) => ({
@@ -1070,8 +1068,8 @@ const _useSawStore = create<SawState>((set, get) => ({
           }
         }),
         bottomTab: 'errors',
-        errors: [...s.errors, `AudioRenderError: ${String(e?.message ?? e)}`],
-        errorLog: [...s.errorLog, { ts: Date.now(), tag: 'audio', text: `AudioRenderError: ${String(e?.message ?? e)}` }],
+        errors: [...s.errors, `AudioRuntimeError: ${String(e?.message ?? e)}`],
+        errorLog: [...s.errorLog, { ts: Date.now(), tag: 'audio', text: `AudioRuntimeError: ${String(e?.message ?? e)}` }],
       }))
     }
   },

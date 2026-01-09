@@ -7,6 +7,9 @@ export type WorkspacePluginListItem = {
   description: string
   category_path?: string
   plugin_dir_rel?: string
+  locked?: boolean
+  origin?: 'stock' | 'dev'
+  integrity?: { expected: string; actual: string; restored: boolean } | null
   inputs?: Array<{ id: string; name: string; type: string }>
   outputs?: Array<{ id: string; name: string; type: string }>
   parameters?: Array<{ id: string; label: string; kind: 'text' | 'number' | 'select'; default: any; options?: string[]; min?: number; max?: number }>
@@ -51,6 +54,9 @@ export async function fetchWorkspacePlugins(apiBase = 'http://127.0.0.1:5127'): 
       description: String(p.description),
       categoryPath: String(p.category_path || 'workspace/runtime'),
       sourcePaths,
+      locked: Boolean(p.locked),
+      origin: p.origin === 'stock' ? 'stock' : 'dev',
+      integrity: p.integrity ?? null,
       inputs: toPorts(p.inputs),
       outputs: toPorts(p.outputs),
       parameters: toParams(p.parameters),

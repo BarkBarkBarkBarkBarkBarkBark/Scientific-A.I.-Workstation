@@ -1,0 +1,33 @@
+id: "labels_from_column"
+name: "Labels From Column"
+version: "0.1.0"
+description: "Extract labels from a table column."
+category_path: "data/io"
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+inputs:
+  df:
+    type: "table"
+params:
+  column:
+    type: "string"
+    default: "condition"
+    ui: { label: "Column" }
+outputs:
+  y:
+    type: "labels"
+execution:
+  deterministic: true
+  cacheable: true
+side_effects:
+  network: "none"
+  disk: "read_only"
+  subprocess: "forbidden"
+resources:
+  gpu: "forbidden"
+  threads: 1
+
+

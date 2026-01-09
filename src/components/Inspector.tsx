@@ -46,7 +46,7 @@ export function Inspector() {
     return (
       <Panel title="Inspector" className="min-h-0 overflow-hidden">
         <div className="p-4 text-sm text-zinc-400">
-          Select a node to inspect parameters and mocked code structure.
+          Select a node to inspect parameters.
         </div>
       </Panel>
     )
@@ -107,45 +107,10 @@ export function Inspector() {
           <NodeParameters nodeId={node.id} />
         </div>
 
-        <div className="mt-4">
-          <div className="mb-2 text-xs font-semibold tracking-wide text-zinc-200">
-            Code Structure (mock)
-          </div>
-          <div className="space-y-2">
-            <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-2">
-              <div className="text-xs font-semibold text-zinc-300">Classes</div>
-              <div className="mt-1 space-y-2 text-xs text-zinc-400">
-                {node.data.codeIndex.classes.map((c) => (
-                  <div key={c.name} className="rounded bg-zinc-950 px-2 py-1">
-                    <div className="font-mono text-zinc-200">{c.name}</div>
-                    <div className="mt-1 text-zinc-500">
-                      methods: {c.methods.join(', ') || '—'}
-                    </div>
-                    <div className="text-zinc-500">
-                      attributes: {c.attributes.join(', ') || '—'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-2">
-              <div className="text-xs font-semibold text-zinc-300">Functions</div>
-              <div className="mt-1 space-y-1 text-xs text-zinc-400">
-                {node.data.codeIndex.functions.map((f) => (
-                  <div key={f.name} className="rounded bg-zinc-950 px-2 py-1 font-mono text-zinc-200">
-                    {f.signature}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-2">
-              <div className="text-xs font-semibold text-zinc-300">Methods / Attributes</div>
-              <div className="mt-1 text-xs text-zinc-500">
-                (Shown per-class above; placeholder for richer AST parsing later.)
-              </div>
-            </div>
+        <div className="mt-4 rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
+          <div className="text-xs font-semibold tracking-wide text-zinc-200">Code</div>
+          <div className="mt-1 text-xs text-zinc-500">
+            Open <span className="font-semibold text-zinc-300">Fullscreen</span> to view the plugin manifest + wrapper.
           </div>
         </div>
       </div>

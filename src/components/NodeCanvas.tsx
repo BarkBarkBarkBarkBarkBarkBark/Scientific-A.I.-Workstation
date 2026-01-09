@@ -26,7 +26,7 @@ function CanvasInner() {
   const tryAddEdge = useSawStore((s) => s.tryAddEdge)
   const isValidConnection = useSawStore((s) => s.isValidConnection)
   const editableMode = useSawStore((s) => s.editableMode)
-  const openEditor = useSawStore((s) => s.openEditor)
+  const openFullscreen = useSawStore((s) => s.openFullscreen)
   const layoutMode = useSawStore((s) => s.layoutMode)
 
   const onConnect = useCallback(
@@ -83,7 +83,7 @@ function CanvasInner() {
           onPaneClick={() => setSelectedNodeId(null)}
           onNodeClick={(_, node) => {
             setSelectedNodeId(node.id)
-            if (editableMode) openEditor(node.id)
+            if (editableMode) openFullscreen(node.id)
           }}
           isValidConnection={isValidConnection}
           nodesDraggable={layoutMode !== 'pipeline'}
