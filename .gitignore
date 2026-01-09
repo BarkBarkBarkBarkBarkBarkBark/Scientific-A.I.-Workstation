@@ -13,3 +13,10 @@ yarn-error.log*
 pnpm-debug.log*
 .venv
 .venv.*
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+
+# Cursor local logs (avoid dirty git state during patch/apply)
+.cursor/debug.log

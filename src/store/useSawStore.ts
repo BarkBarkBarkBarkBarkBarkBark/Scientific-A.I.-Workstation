@@ -15,7 +15,7 @@ import type { PluginDefinition } from '../types/saw'
 import { plugins as builtinPlugins } from '../mock/plugins'
 import { generateAiPlan } from '../mock/ai'
 import { makeMockCode, makeMockCodeIndex, makeMockGitPreview } from '../mock/codegen'
-import { getAiStatus, requestAiChat, requestAiPlan, type ChatMessage } from '../ai/client'
+import { approveAgentTool, getAiStatus, requestAgentChat, requestAiPlan, type AgentToolCall, type ChatMessage } from '../ai/client'
 import type { AiStatus } from '../types/ai'
 import { decodeAudioFile, renderLowpass } from '../audio/webaudio'
 import { sourceFiles } from '../dev/sourceFiles'
@@ -23,7 +23,7 @@ import type { PatchProposal } from '../types/patch'
 import { parsePatchProposalFromAssistant } from '../patching/parsePatchProposal'
 import { fetchWorkspacePlugins } from '../plugins/workspace'
 
-type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev'
+type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo'
 
 type EditorState = {
   open: boolean
@@ -54,7 +54,7 @@ type SawState = {
   aiStatus: AiStatus | null
   layoutMode: LayoutMode
   chatBusy: boolean
-  chat: { messages: ChatMessage[] }
+  chat: { messages: ChatMessage[]; conversationId: string | null; pendingTool: AgentToolCall | null }
   dev: { attachedPaths: string[]; lastForbidden?: { op: string; path: string; patch?: string } | null }
   patchReview: { open: boolean; busy: boolean; proposal: PatchProposal | null; lastError?: string }
   workspacePlugins: PluginDefinition[]
@@ -87,6 +87,7 @@ type SawState = {
   refreshAiStatus: () => Promise<void>
   submitGoal: (goal: string) => Promise<void>
   sendChat: (text: string) => Promise<void>
+  approvePendingTool: (approved: boolean) => Promise<void>
   clearChat: () => void
   devAttachPath: (path: string) => void
   devDetachPath: (path: string) => void
@@ -237,6 +238,8 @@ const _useSawStore = create<SawState>((set, get) => ({
           'SAW Chat is ready. Ask for pipeline help, debugging ideas, or how to use a module.',
       },
     ],
+    conversationId: null,
+    pendingTool: null,
   },
   dev: { attachedPaths: [] },
   patchReview: { open: false, busy: false, proposal: null, lastError: '' },
@@ -537,6 +540,8 @@ const _useSawStore = create<SawState>((set, get) => ({
             content: 'SAW Chat is ready. Ask for pipeline help, debugging ideas, or how to use a module.',
           },
         ],
+        conversationId: null,
+        pendingTool: null,
       },
       logs: [...s.logs, '[chat] cleared'],
     }))
@@ -549,232 +554,75 @@ const _useSawStore = create<SawState>((set, get) => ({
     set({ chatBusy: true })
     set((s) => ({
       bottomTab: 'chat',
-      chat: { messages: [...s.chat.messages, { role: 'user', content }] },
+      chat: { ...s.chat, messages: [...s.chat.messages, { role: 'user', content }] },
       logs: [...s.logs, '[chat] user message'],
     }))
 
-    const state = get()
-    const selected = state.nodes.find((n) => n.id === state.selectedNodeId) ?? null
-    const pipelineSummary = state.nodes.map((n, i) => `${i + 1}. ${n.data.pluginId}`).join('\n')
-
-    const lc = content.toLowerCase()
-    const cleaned = lc.replace(/[^a-z]/g, '')
-    const wantsFileList =
-      /what\s+f\w*iles?\s+can\s+you\s+see/i.test(lc) ||
-      /what\s+f\w*iles?\s+do\s+you\s+see/i.test(lc) ||
-      /can\s+you\s+see\s+any\s+f\w*iles?/i.test(lc) ||
-      /list\s+f\w*iles?/i.test(lc) ||
-      /show\s+f\w*iles?/i.test(lc) ||
-      cleaned.includes('whatfilescanyousee') ||
-      cleaned.includes('whatfilesdoyousee')
-    const wantsDocsList =
-      /what\s+docs\s+can\s+you\s+see/i.test(lc) ||
-      /what\s+documentation\s+can\s+you\s+see/i.test(lc) ||
-      /list\s+docs/i.test(lc) ||
-      /show\s+docs/i.test(lc) ||
-      cleaned.includes('whatdocscanyousee') ||
-      cleaned.includes('whatdocumentationcanyousee')
-
-    // Repo index (paths only) so chat can self-inspect at a high level.
-    // (Exclude huge dirs server-side; this is safe to include by default.)
-    let treeIndexRoot = ''
-    let treeIndexSrc = ''
-    let treeIndexSource = 'runtime'
     try {
-      const toLines = async (root: string) => {
-        const r = await fetch(`/api/dev/tree?root=${encodeURIComponent(root)}&depth=3&max=2000`)
-        if (!r.ok) return ''
-        const j = (await r.json()) as any
-        const lines: string[] = []
-        const walk = (n: any) => {
-          if (!n) return
-          if (n.type === 'file') lines.push(n.path)
-          else if (n.type === 'dir') {
-            if (n.path) lines.push(n.path + '/')
-            for (const c of n.children ?? []) walk(c)
-          }
-        }
-        walk(j.tree)
-        return lines.slice(0, 600).join('\n')
-      }
-      treeIndexRoot = await toLines('.')
-      treeIndexSrc = await toLines('src')
-    } catch {
-      // ignore
-    }
+      const state = get()
+      const r = await requestAgentChat(state.chat.conversationId, content)
+      const status = (r as any).status
+      const cid = (r as any).conversation_id ?? state.chat.conversationId
+      const pending = status === 'needs_approval' ? ((r as any).tool_call ?? null) : null
+      const msg =
+        status === 'needs_approval'
+          ? `Approval required: ${(pending as any)?.name ?? 'tool'}`
+          : (r as any).message || (r as any).error || ''
 
-    if (!treeIndexRoot) {
-      // Fallback to bundled index (works even when dev FS endpoints are unavailable).
-      treeIndexSource = 'bundled'
-      const paths = sourceFiles.map((f) => f.path)
-      const uniq = Array.from(new Set(paths))
-      const lines = uniq.slice(0, 800)
-      treeIndexRoot = lines.slice(0, 600).join('\n')
-      treeIndexSrc = lines.filter((p) => p.startsWith('src/')).slice(0, 600).join('\n')
-    }
-
-    // Fast local answer for "what files/docs can you see?" so we don't depend on model behavior.
-    if (wantsFileList || wantsDocsList) {
-      const all = treeIndexRoot
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean)
-      const listed = wantsDocsList
-        ? all.filter((p) => p.endsWith('.md') || p.endsWith('.json'))
-        : all
-      const snippet = listed.slice(0, 200).join('\n')
-      const header = wantsDocsList ? 'Docs visible:' : 'Files visible:'
       set((s) => ({
         chatBusy: false,
-        chat: {
-          messages: [
-            ...s.chat.messages,
-            {
-              role: 'assistant',
-              content:
-                `${header}\n\n` +
-                '```' +
-                '\n' +
-                snippet +
-                '\n' +
-                '```' +
-                `\n(source: ${treeIndexSource}${listed.length > 200 ? `, showing 200/${listed.length}` : ''})`,
-            },
-          ],
-        },
-      }))
-      return
-    }
-
-    // Attach file contents (dev-only; server enforces caps)
-    const attached = state.dev.attachedPaths.slice(0, 8)
-    const attachedBlocks: string[] = []
-    let budget = 60_000
-
-    // Auto-attach: if the user mentions a file that exists in the repo index, include it.
-    // This prevents "patch does not apply" from blind edits where the model never saw real contents.
-    const repoPaths = new Set(
-      treeIndexRoot
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .filter((p) => !p.endsWith('/')),
-    )
-    const mentioned = new Set<string>()
-    const candidates = content.match(/[A-Za-z0-9_.\\/\-]+\.(tsx|ts|md|json|css|cjs|txt)/g) ?? []
-    for (const c of candidates) {
-      const p = c.replaceAll('\\', '/').replace(/^\.?\//, '')
-      if (repoPaths.has(p)) mentioned.add(p)
-      if (!p.includes('/')) {
-        for (const rp of repoPaths) if (rp === p || rp.endsWith(`/${p}`)) mentioned.add(rp)
-      }
-    }
-    for (const p of attached) {
-      if (budget <= 0) break
-      try {
-        const r = await fetch(`/api/dev/file?path=${encodeURIComponent(p)}`)
-        if (!r.ok) continue
-        const j = (await r.json()) as { content: string }
-        const c = String(j.content ?? '')
-        const slice = c.slice(0, Math.max(0, Math.min(c.length, budget)))
-        budget -= slice.length
-        attachedBlocks.push(`FILE:${p}\n---\n${slice}\n---\n`)
-      } catch {
-        // ignore
-      }
-    }
-
-    for (const p of Array.from(mentioned)) {
-      if (budget <= 0) break
-      if (attached.includes(p)) continue
-      try {
-        const r = await fetch(`/api/dev/file?path=${encodeURIComponent(p)}`)
-        if (!r.ok) continue
-        const j = (await r.json()) as { content: string }
-        const c = String(j.content ?? '')
-        const slice = c.slice(0, Math.max(0, Math.min(c.length, budget)))
-        budget -= slice.length
-        attachedBlocks.push(`FILE:${p}\n---\n${slice}\n---\n`)
-      } catch {
-        // ignore
-      }
-    }
-
-    // Persistent session log tail (server-side)
-    let sessionTail = ''
-    try {
-      const r = await fetch('/api/dev/session/log?tail=200')
-      if (r.ok) {
-        const j = (await r.json()) as any
-        sessionTail = String(j.ndjson ?? '')
-      }
-    } catch {
-      // ignore
-    }
-
-    const context: ChatMessage = {
-      role: 'system',
-      content: [
-        'Context:',
-        `layoutMode=${state.layoutMode}`,
-        selected ? `selected=${selected.data.pluginId}` : 'selected=null',
-        'pipeline:',
-        pipelineSummary || '(empty)',
-        'recent_logs_tail:',
-        ...state.logs.slice(-30),
-        'recent_errors_tail:',
-        ...state.errorLog.slice(-30).map((e) => `[${new Date(e.ts).toLocaleTimeString()}] ${e.tag}: ${e.text}`),
-        'recent_session_tail:',
-        sessionTail || '(unavailable)',
-        treeIndexRoot ? `repo_index_root:${treeIndexSource}` : 'repo_index_root:(unavailable)',
-        treeIndexRoot || '',
-        treeIndexSrc ? `repo_index_src:${treeIndexSource}` : 'repo_index_src:(unavailable)',
-        treeIndexSrc || '',
-        attachedBlocks.length ? 'attached_files:' : 'attached_files:(none)',
-        ...attachedBlocks,
-      ].join('\n'),
-    }
-
-    try {
-      const recent = state.chat.messages.slice(-12)
-      // If user intent looks like an edit request, nudge the model to output a PatchProposal JSON (diff fallback allowed).
-      const editIntent =
-        /\b(edit|change|modify|add|remove|delete|rename|fix|refactor|commit|patch|create|make|write|append|new\s+file)\b/i.test(
-          content,
-        )
-      const userMsg: ChatMessage = editIntent
-        ? {
-            role: 'user',
-            content:
-              `PROPOSE_PATCH\nReturn ONLY ONE of:\n` +
-              `A) a single JSON object matching PatchProposal (preferred), where each files[i].diff is a git-compatible unified diff for that file; OR\n` +
-              `B) a unified diff in a single \`\`\`diff\`\`\` block (fallback).\n\nRequest:\n${content}`,
-          }
-        : { role: 'user', content }
-
-      const r = await requestAiChat([context, ...recent, userMsg])
-      set((s) => ({
-        chatBusy: false,
-        chat: { messages: [...s.chat.messages, { role: 'assistant', content: r.message || '' }] },
+        chat: { ...s.chat, conversationId: cid, pendingTool: pending, messages: [...s.chat.messages, { role: 'assistant', content: msg }] },
       }))
     } catch (e: any) {
       set((s) => ({
         chatBusy: false,
         bottomTab: 'errors',
-        errors: [...s.errors, `ChatError: ${String(e?.message ?? e)}`],
+        errors: [...s.errors, `AgentChatError: ${String(e?.message ?? e)}`],
         errorLog: [
           ...s.errorLog,
-          { ts: Date.now(), tag: 'chat', text: `ChatError: ${String(e?.message ?? e)}` },
+          { ts: Date.now(), tag: 'chat', text: `AgentChatError: ${String(e?.message ?? e)}` },
         ],
         chat: {
+          ...s.chat,
+          pendingTool: null,
           messages: [
             ...s.chat.messages,
             {
               role: 'assistant',
-              content:
-                'Chat is unavailable (check OPENAI_API_KEY + restart dev server). Falling back to mocked AI planning still works.',
+              content: 'Agent chat is unavailable (check OPENAI_API_KEY + restart SAW API + Patch Engine).',
             },
           ],
+        },
+      }))
+    }
+  },
+
+  approvePendingTool: async (approved) => {
+    const state = get()
+    const cid = state.chat.conversationId
+    const pending = state.chat.pendingTool
+    if (!cid || !pending?.id) return
+    set({ chatBusy: true })
+    try {
+      const r = await approveAgentTool(cid, pending.id, Boolean(approved))
+      const status = (r as any).status
+      const nextCid = (r as any).conversation_id ?? cid
+      const nextPending = status === 'needs_approval' ? ((r as any).tool_call ?? null) : null
+      const msg =
+        status === 'needs_approval'
+          ? `Approval required: ${((nextPending as any)?.name ?? 'tool') as string}`
+          : (r as any).message || (r as any).error || ''
+      set((s) => ({
+        chatBusy: false,
+        chat: { ...s.chat, conversationId: nextCid, pendingTool: nextPending, messages: [...s.chat.messages, { role: 'assistant', content: msg }] },
+      }))
+    } catch (e: any) {
+      set((s) => ({
+        chatBusy: false,
+        chat: {
+          ...s.chat,
+          pendingTool: null,
+          messages: [...s.chat.messages, { role: 'assistant', content: `Approve failed: ${String(e?.message ?? e)}` }],
         },
       }))
     }
@@ -909,6 +757,7 @@ const _useSawStore = create<SawState>((set, get) => ({
             }))
             set((s) => ({
               chat: {
+                ...s.chat,
                 messages: [
                   ...s.chat.messages,
                   {
@@ -928,6 +777,7 @@ const _useSawStore = create<SawState>((set, get) => ({
           if (j?.error === 'target_dirty' && Array.isArray(j?.paths) && j.paths.length) {
             set((s) => ({
               chat: {
+                ...s.chat,
                 messages: [
                   ...s.chat.messages,
                   {
@@ -946,6 +796,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         }
         set((s) => ({
           chat: {
+            ...s.chat,
             messages: [
               ...s.chat.messages,
               { role: 'assistant', content: `Apply patch failed:\n${t}` },
@@ -965,6 +816,7 @@ const _useSawStore = create<SawState>((set, get) => ({
       }))
       set((s) => ({
         chat: {
+          ...s.chat,
           messages: [
             ...s.chat.messages,
             { role: 'assistant', content: `Apply patch failed:\n${msg}` },
@@ -992,13 +844,13 @@ const _useSawStore = create<SawState>((set, get) => ({
           errorLog: [...s.errorLog, { ts: Date.now(), tag: 'git', text: `CommitError: ${t}` }],
         }))
         set((s) => ({
-          chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${t}` }] },
+          chat: { ...s.chat, messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${t}` }] },
         }))
         return { ok: false, error: t }
       }
       set((s) => ({ logs: [...s.logs, `[git] committed: ${msg}`] }))
       set((s) => ({
-        chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Committed:\n${msg}` }] },
+        chat: { ...s.chat, messages: [...s.chat.messages, { role: 'assistant', content: `Committed:\n${msg}` }] },
       }))
       return { ok: true }
     } catch (e: any) {
@@ -1009,7 +861,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         errorLog: [...s.errorLog, { ts: Date.now(), tag: 'git', text: `CommitError: ${msg}` }],
       }))
       set((s) => ({
-        chat: { messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${msg}` }] },
+        chat: { ...s.chat, messages: [...s.chat.messages, { role: 'assistant', content: `Commit failed:\n${msg}` }] },
       }))
       return { ok: false, error: msg }
     }

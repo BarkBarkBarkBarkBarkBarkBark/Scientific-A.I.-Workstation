@@ -34,17 +34,40 @@ export async function requestAiPlan(goal: string, plugins: PluginDefinition[]): 
 export type ChatRole = 'system' | 'user' | 'assistant'
 export type ChatMessage = { role: ChatRole; content: string }
 
-export async function requestAiChat(messages: ChatMessage[]) {
-  const r = await fetch('/api/ai/chat', {
+export type AgentToolCall = { id: string; name: string; arguments: any }
+export type AgentChatResponse =
+  | { status: 'ok'; conversation_id: string; message: string; model?: string }
+  | { status: 'needs_approval'; conversation_id: string; tool_call: AgentToolCall }
+  | { status: 'error'; conversation_id?: string; error: string }
+
+export async function requestAgentChat(conversationId: string | null, message: string): Promise<AgentChatResponse> {
+  const r = await fetch('/api/saw/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ conversation_id: conversationId, message }),
   })
   if (!r.ok) {
     const t = await r.text()
-    throw new Error(`Chat request failed: ${t}`)
+    throw new Error(`Agent chat request failed: ${t}`)
   }
-  return (await r.json()) as { message: string; model: string }
+  return (await r.json()) as AgentChatResponse
+}
+
+export async function approveAgentTool(
+  conversationId: string,
+  toolCallId: string,
+  approved: boolean,
+): Promise<AgentChatResponse> {
+  const r = await fetch('/api/saw/agent/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: conversationId, tool_call_id: toolCallId, approved }),
+  })
+  if (!r.ok) {
+    const t = await r.text()
+    throw new Error(`Agent approve request failed: ${t}`)
+  }
+  return (await r.json()) as AgentChatResponse
 }
 
 

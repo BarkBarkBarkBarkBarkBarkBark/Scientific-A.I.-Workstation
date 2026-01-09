@@ -50,6 +50,8 @@ export function ChatPanel() {
   const [text, setText] = useState('')
   const [patchMode, setPatchMode] = useState(false)
   const messages = useSawStore((s) => s.chat.messages)
+  const pendingTool = useSawStore((s) => s.chat.pendingTool)
+  const approvePendingTool = useSawStore((s) => s.approvePendingTool)
   const busy = useSawStore((s) => s.chatBusy)
   const sendChat = useSawStore((s) => s.sendChat)
   const attached = useSawStore((s) => s.dev.attachedPaths)
@@ -68,6 +70,35 @@ export function ChatPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-auto p-3">
+        {pendingTool?.id && (
+          <div className="mb-3 rounded-md border border-emerald-900/40 bg-emerald-950/20 p-2 text-[11px] text-zinc-100">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-semibold">Approval required</div>
+              <div className="font-mono text-zinc-300">{pendingTool.name}</div>
+            </div>
+            <pre className="mt-2 max-h-[180px] overflow-auto rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] text-zinc-200">
+              {JSON.stringify(pendingTool.arguments ?? {}, null, 2)}
+            </pre>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void approvePendingTool(true)}
+                className="rounded-md bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-zinc-50 hover:bg-emerald-600 disabled:opacity-50"
+              >
+                Approve + run
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void approvePendingTool(false)}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        )}
         {lastForbidden?.path && (
           <div className="mb-3 rounded-md border border-amber-900/40 bg-amber-950/20 p-2 text-[11px] text-amber-100">
             <div className="flex items-center justify-between gap-2">

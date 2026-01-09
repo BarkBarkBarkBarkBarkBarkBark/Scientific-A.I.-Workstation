@@ -18,6 +18,7 @@ from .run_manager import spawn_run
 from .settings import get_settings
 from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
+from .agent import agent_chat, agent_approve
 
 
 settings = get_settings()
@@ -71,6 +72,27 @@ def health() -> HealthResponse:
         at=datetime.utcnow(),
         workspace_root=settings.workspace_root,
     )
+
+
+class AgentChatRequest(BaseModel):
+    conversation_id: str | None = None
+    message: str
+
+
+class AgentApproveRequest(BaseModel):
+    conversation_id: str
+    tool_call_id: str
+    approved: bool
+
+
+@app.post("/agent/chat")
+def agent_chat_post(req: AgentChatRequest) -> dict[str, Any]:
+    return agent_chat(conversation_id=req.conversation_id, message=req.message)
+
+
+@app.post("/agent/approve")
+def agent_approve_post(req: AgentApproveRequest) -> dict[str, Any]:
+    return agent_approve(conversation_id=req.conversation_id, tool_call_id=req.tool_call_id, approved=req.approved)
 
 
 class MigrateResponse(BaseModel):

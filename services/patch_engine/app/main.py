@@ -39,8 +39,9 @@ CAPS_PATH = os.path.join(SAW_DIR, "caps.json")
 SESSION_LOG = os.path.join(SAW_DIR, "session.ndjson")
 RECOVERY_PATH = os.path.join(SAW_DIR, "recovery.json")
 
-# Debug-mode forensic log (Cursor-provisioned)
-DEBUG_LOG_PATH = "/Users/marco/Cursor_Folder/Cursor_Codespace/Scientific A.I. Workstation/.cursor/debug.log"
+# Debug-mode forensic log.
+# IMPORTANT: default to a gitignored location under .saw/ so we don't dirty the repo and break stashing.
+DEBUG_LOG_PATH = os.environ.get("SAW_PATCH_ENGINE_DEBUG_LOG_PATH") or os.path.join(SAW_DIR, "debug.ndjson")
 _REQ_ID: contextvars.ContextVar[str] = contextvars.ContextVar("saw_req_id", default="")
 
 SAW_PATCH_ENGINE_USE_STASH = _truthy(os.environ.get("SAW_PATCH_ENGINE_USE_STASH", "0"))
@@ -48,6 +49,7 @@ SAW_PATCH_ENGINE_USE_STASH = _truthy(os.environ.get("SAW_PATCH_ENGINE_USE_STASH"
 def _dbg(hypothesisId: str, location: str, message: str, data: dict[str, Any] | None = None) -> None:
     # Keep tiny + never log secrets.
     try:
+        os.makedirs(SAW_DIR, exist_ok=True)
         payload = {
             "sessionId": "debug-session",
             "runId": "pre-fix",
@@ -112,6 +114,16 @@ class ApplyPatchRequest(BaseModel):
 
 class GitCommitRequest(BaseModel):
     message: str
+
+
+# Avoid committing runtime artifacts that can change during safe operations.
+GIT_COMMIT_EXCLUDE_PATHSPECS: list[str] = [
+    ":(exclude).cursor/debug.log",
+    ":(exclude).saw/**",
+    ":(exclude)**/__pycache__/**",
+    ":(exclude)**/*.pyc",
+    ":(exclude)**/*.pyo",
+]
 
 
 # -----------------------
@@ -1140,7 +1152,11 @@ def dev_git_commit(body: GitCommitRequest) -> dict[str, Any]:
     if not msg:
         raise HTTPException(status_code=400, detail={"error": "missing_commit_message"})
     try:
-        run_git(["add", "-A"])
+        # Use exclude pathspecs so agent commits don't accidentally include runtime junk.
+        add = run_git_allow_fail(["add", "-A", "--", ".", *GIT_COMMIT_EXCLUDE_PATHSPECS])
+        if not add.get("ok"):
+            # Fallback for older git pathspec behavior.
+            run_git(["add", "-A"])
         r = run_git(["commit", "-m", msg, "--no-gpg-sign"])
         append_session({"type": "git.commit", "message": msg})
         return {"ok": True, "stdout": r["stdout"], "stderr": r["stderr"]}

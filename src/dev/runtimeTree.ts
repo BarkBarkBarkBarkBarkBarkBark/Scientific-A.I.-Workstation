@@ -8,20 +8,20 @@ export type CapsManifest = { version: 1; updatedAt: number; rules: CapsRule[] }
 export async function fetchDevTree(params?: { root?: string; depth?: number }) {
   const root = params?.root ?? '.'
   const depth = params?.depth ?? 6
-  const r = await fetch(`/api/dev/tree?root=${encodeURIComponent(root)}&depth=${encodeURIComponent(depth)}`)
+  const r = await fetch(`/api/dev/tree?root=${encodeURIComponent(root)}&depth=${encodeURIComponent(depth)}`, { cache: 'no-store' })
   if (!r.ok) throw new Error(await r.text())
   const j = (await r.json()) as { tree: DevTreeNode }
   return j.tree
 }
 
 export async function fetchDevFile(path: string) {
-  const r = await fetch(`/api/dev/file?path=${encodeURIComponent(path)}`)
+  const r = await fetch(`/api/dev/file?path=${encodeURIComponent(path)}`, { cache: 'no-store' })
   if (!r.ok) throw new Error(await r.text())
   return (await r.json()) as { path: string; content: string }
 }
 
 export async function fetchDevCaps() {
-  const r = await fetch('/api/dev/caps')
+  const r = await fetch('/api/dev/caps', { cache: 'no-store' })
   if (!r.ok) throw new Error(await r.text())
   return (await r.json()) as CapsManifest
 }
