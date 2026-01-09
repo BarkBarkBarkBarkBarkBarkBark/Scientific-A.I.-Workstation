@@ -64,28 +64,6 @@ def _dbg(hypothesisId: str, location: str, message: str, data: dict[str, Any] | 
     except Exception:
         pass
 
-# region cursor debug log
-# NOTE: Debug-mode runtime evidence path (do not log secrets).
-_CURSOR_DEBUG_LOG_PATH = "/Users/marco/Cursor_Folder/Cursor_Codespace/Scientific A.I. Workstation/.cursor/debug.log"
-
-def _cdbg(hypothesisId: str, location: str, message: str, data: dict[str, Any] | None = None) -> None:
-    try:
-        run_id = str(os.environ.get("SAW_DEBUG_RUN_ID") or "pre-fix")
-        payload = {
-            "sessionId": "debug-session",
-            "runId": run_id,
-            "hypothesisId": hypothesisId,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_CURSOR_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-# endregion
-
 # Validation policy:
 # - strict: always run npm build on any safe op
 # - auto: run npm build only if patch touches "shell" paths (e.g. src/); skip for workspace-only ops
@@ -869,37 +847,13 @@ def safe_write(body: SafeWriteRequest) -> dict[str, Any]:
     pre_head = git_head()
     dirty_paths = git_dirty_paths()
     overlap = _dirty_overlap_list(dirty_paths=dirty_paths, targets=[rel])
-    # region cursor debug log
-    _cdbg(
-        "H_dirty_gate",
-        "services/patch_engine/app/main.py:safe_write",
-        "dirty_check",
-        {"path": rel, "use_stash": bool(SAW_PATCH_ENGINE_USE_STASH), "preHead": pre_head, "dirtyCount": len(dirty_paths), "overlap": overlap},
-    )
-    # endregion
     # Allow workspace files (e.g. saw-workspace/todo.md) to be edited even if git-dirty.
     allow_dirty_workspace = rel.startswith("saw-workspace/")
     if overlap and (not SAW_PATCH_ENGINE_USE_STASH) and allow_dirty_workspace:
         append_session({"type": "safe.write.bypass", "reason": "target_dirty_workspace", "paths": overlap})
-        # region cursor debug log
-        _cdbg(
-            "H_dirty_gate",
-            "services/patch_engine/app/main.py:safe_write",
-            "bypass_target_dirty_workspace",
-            {"path": rel, "overlap": overlap},
-        )
-        # endregion
         overlap = []
     if overlap and (not SAW_PATCH_ENGINE_USE_STASH):
         append_session({"type": "safe.write.reject", "reason": "target_dirty", "paths": overlap})
-        # region cursor debug log
-        _cdbg(
-            "H_dirty_gate",
-            "services/patch_engine/app/main.py:safe_write",
-            "reject_target_dirty",
-            {"path": rel, "overlap": overlap},
-        )
-        # endregion
         raise HTTPException(
             status_code=409,
             detail={"error": "target_dirty", "paths": overlap, "hint": "commit/stash these paths (or set SAW_PATCH_ENGINE_USE_STASH=1)"},
@@ -937,14 +891,6 @@ def safe_write(body: SafeWriteRequest) -> dict[str, Any]:
                 pass
         clear_recovery()
         append_session({"type": "safe.write.ok", "path": rel})
-        # region cursor debug log
-        _cdbg(
-            "H_dirty_gate",
-            "services/patch_engine/app/main.py:safe_write",
-            "ok",
-            {"path": rel},
-        )
-        # endregion
         return {"ok": True}
     except HTTPException:
         raise
@@ -1079,37 +1025,13 @@ def safe_apply_patch(body: ApplyPatchRequest) -> dict[str, Any]:
     dirty_paths = git_dirty_paths()
     targets = list(parsed["touched"]) + list(parsed["deleted"])
     overlap = _dirty_overlap_list(dirty_paths=dirty_paths, targets=targets)
-    # region cursor debug log
-    _cdbg(
-        "H_dirty_gate",
-        "services/patch_engine/app/main.py:safe_apply_patch",
-        "dirty_check",
-        {"use_stash": bool(SAW_PATCH_ENGINE_USE_STASH), "preHead": pre_head, "dirtyCount": len(dirty_paths), "targets": targets, "overlap": overlap},
-    )
-    # endregion
     # Allow workspace-only patches to apply even if those workspace files are git-dirty.
     workspace_only = bool(targets) and all(t.startswith("saw-workspace/") for t in targets)
     if overlap and (not SAW_PATCH_ENGINE_USE_STASH) and workspace_only:
         append_session({"type": "safe.patch.bypass", "reason": "target_dirty_workspace", "paths": overlap, "targets": targets})
-        # region cursor debug log
-        _cdbg(
-            "H_dirty_gate",
-            "services/patch_engine/app/main.py:safe_apply_patch",
-            "bypass_target_dirty_workspace",
-            {"overlap": overlap, "targets": targets},
-        )
-        # endregion
         overlap = []
     if overlap and (not SAW_PATCH_ENGINE_USE_STASH):
         append_session({"type": "safe.patch.reject", "reason": "target_dirty", "paths": overlap, "touched": parsed["touched"], "deleted": parsed["deleted"]})
-        # region cursor debug log
-        _cdbg(
-            "H_dirty_gate",
-            "services/patch_engine/app/main.py:safe_apply_patch",
-            "reject_target_dirty",
-            {"overlap": overlap, "touched": parsed["touched"], "deleted": parsed["deleted"]},
-        )
-        # endregion
         raise HTTPException(
             status_code=409,
             detail={"error": "target_dirty", "paths": overlap, "hint": "commit/stash these paths (or set SAW_PATCH_ENGINE_USE_STASH=1)"},

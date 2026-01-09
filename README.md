@@ -2,6 +2,42 @@
 
 Desktop-style UI (Ableton-for-science vibe) to assemble pipelines from plugins, inspect nodes, and mock AI-assisted debugging/editing.
 
+## Architecture (what talks to what)
+
+The “agent can edit files” because the UI talks to a **tool-calling agent** (SAW API), which proxies safe filesystem operations through the **Patch Engine**.
+
+```mermaid
+flowchart LR
+  UI[Frontend_UI] -->|"POST /api/saw/agent/chat"| SAWAPI[SAW_API_agent]
+  UI -->|"POST /api/saw/agent/approve"| SAWAPI
+  SAWAPI -->|"HTTP /api/dev/file"| PatchEngine[Patch_Engine]
+  SAWAPI -->|"HTTP /api/dev/safe/write"| PatchEngine
+  SAWAPI -->|"HTTP /api/dev/safe/applyPatch"| PatchEngine
+  PatchEngine --> FS[Repo_filesystem]
+```
+
+### Editing model (why it is safe-by-default)
+
+- **Approvals**: any write operation is surfaced in the UI as “Approval required”.
+- **Caps**: Patch Engine enforces read/write/delete capabilities from `.saw/caps.json`.
+- **Safe operations**:
+  - `safe_write`: replace a whole file (great for `saw-workspace/todo.md`)
+  - `applyPatch`: apply unified diffs (for multi-file edits)
+  - both can run validation and auto-rollback on failure (Patch Engine feature)
+- **Workspace sandbox**: `saw-workspace/` is the intended “agent-writable” area. `todo.md` lives there.
+
+### Key code paths
+
+- **Frontend**
+  - `src/ai/client.ts`: calls `/api/saw/agent/chat` + `/api/saw/agent/approve`
+  - `src/store/useSawStore.ts`: UI state + “Approve + run” wiring
+  - `src/components/TodoPanel.tsx`: reads (and will edit) the todo markdown
+- **SAW API (agent + tool loop)**: `services/saw_api/app/agent.py` (will be refactored into a package)
+- **Patch Engine (safe file ops + caps)**: `services/patch_engine/app/main.py`
+- **Workspace docs**
+  - `saw-workspace/todo.md`: human + agent task tracking
+  - `saw-workspace/agent/agent_workspace.md`: agent scratchpad (planning/notes)
+
 ## Run
 
 ```bash

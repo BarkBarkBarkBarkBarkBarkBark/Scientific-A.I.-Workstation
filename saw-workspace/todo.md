@@ -1,4 +1,3 @@
 - [x] go to bed
-- [ ] make dinner
-- [ ] put away laundry
-- [ ] agent write test 2
+- [x] make dinner
+- [ ] put away laundry 
