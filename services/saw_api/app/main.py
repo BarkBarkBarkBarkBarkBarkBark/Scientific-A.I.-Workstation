@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pgvector.psycopg import Vector
@@ -19,6 +19,7 @@ from .settings import get_settings
 from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
 from .agent import agent_chat, agent_approve
+from .agent_log import agent_log_path
 
 
 settings = get_settings()
@@ -93,6 +94,22 @@ def agent_chat_post(req: AgentChatRequest) -> dict[str, Any]:
 @app.post("/agent/approve")
 def agent_approve_post(req: AgentApproveRequest) -> dict[str, Any]:
     return agent_approve(conversation_id=req.conversation_id, tool_call_id=req.tool_call_id, approved=req.approved)
+
+
+@app.get("/agent/log")
+def agent_log_get(tail: int = Query(200, ge=10, le=5000)) -> dict[str, Any]:
+    """
+    Read the SAW API agent log tail (dev-only).
+    Note: message bodies are only logged when SAW_AGENT_LOG_CONTENT=1.
+    """
+    try:
+        path = agent_log_path(settings)
+        raw = open(path, "r", encoding="utf-8").read()
+        lines = raw.splitlines() if raw else []
+        tail_n = max(10, min(5000, int(tail)))
+        return {"path": path, "tail": tail_n, "ndjson": "\n".join(lines[-tail_n:])}
+    except Exception as e:
+        return {"path": agent_log_path(settings), "tail": int(tail), "ndjson": "", "error": str(e)}
 
 
 class MigrateResponse(BaseModel):

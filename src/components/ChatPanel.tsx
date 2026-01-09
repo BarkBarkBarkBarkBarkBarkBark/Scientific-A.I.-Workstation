@@ -278,13 +278,11 @@ export function ChatPanel() {
             /\b(edit|change|modify|add|remove|delete|rename|fix|refactor|commit|patch|create|make|write|append|new\s+file)\b/i.test(
               msg,
             )
-          const wrapped =
-            patchMode && editIntent
-              ? `PROPOSE_PATCH\nReturn ONLY ONE of:\n` +
-                `A) a single JSON object matching PatchProposal (preferred), where each files[i].diff is a git-compatible unified diff for that file; OR\n` +
-                `B) a unified diff in a single \`\`\`diff\`\`\` block (fallback).\n\nRequest:\n${msg}`
-              : msg
-          await sendChat(wrapped)
+          // NOTE: Chat now uses a server-side tool-calling agent; do NOT wrap with PROPOSE_PATCH,
+          // because it encourages raw diffs that can be malformed and fail Patch Engine checks.
+          // Keep the toggle for now but treat it as a UI hint only.
+          void editIntent
+          await sendChat(msg)
         }}
       >
         <button
