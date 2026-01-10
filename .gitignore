@@ -3,7 +3,6 @@ dist
 .DS_Store
 .vite
 .env
-.env.*
 .saw
 .npm-cache
 *.tsbuildinfo

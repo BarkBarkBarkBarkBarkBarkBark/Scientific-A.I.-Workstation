@@ -54,8 +54,14 @@ npm run dev
 
 Starts: Postgres (pgvector) + SAW API + frontend.
 
+**Linux/macOS:**
 ```bash
 ./scripts/dev_all.sh --frontend-port 7176 --api-port 5127
+```
+
+**Windows (PowerShell):**
+```powershell
+.\scripts\dev_all.ps1 -FrontendPort 7176 -ApiPort 5127
 ```
 
 ### Manual (3 terminals)
