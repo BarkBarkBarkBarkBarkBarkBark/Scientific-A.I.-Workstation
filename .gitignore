@@ -12,6 +12,7 @@ yarn-error.log*
 pnpm-debug.log*
 .venv
 .venv.*
+todo.md
 
 # Python runtime artifacts
 __pycache__/
