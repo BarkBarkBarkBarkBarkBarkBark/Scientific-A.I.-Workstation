@@ -1,0 +1,56 @@
+id: "zlab.sorting_script"
+name: "ZLab Spike Sorting (Kilosort4)"
+version: "0.1.0"
+description: "Run zsort notebook pipeline (Intan -> Kilosort4 -> analyzer -> optional curation -> figures)."
+category_path: "workspace/zlab/sorting"
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+  # Keep this as a plain pip list so SAW doesn't try to `-e .` from requirements.txt.
+  pip:
+    - "spikeinterface[full]==0.103.0"
+    - "spikeinterface-gui==0.11.0"
+    - "kilosort==4.1.1"
+    - "sortingview"
+inputs: {}
+params:
+  patient:
+    type: "string"
+    default: "Intan_RHD_2000"
+    ui: { label: "Patient (folder under data root)" }
+  session:
+    type: "string"
+    default: "session_1"
+    ui: { label: "Session (folder under patient)" }
+  recording_path:
+    type: "string"
+    default: ""
+    ui: { label: "Recording path (optional; overrides auto-find .rhd)" }
+  stream_id:
+    type: "string"
+    default: "0"
+    ui: { label: "Intan stream_id" }
+  probe_json:
+    type: "string"
+    default: "neuronexus-A16x1_2mm_50_177_A16.json"
+    ui: { label: "Probe file (in Custom_Probes/)" }
+  step:
+    type: "string"
+    default: "sort_analyze"
+    ui: { label: "Step: sort | analyze | sort_analyze | curate | figures | all" }
+outputs:
+  summary:
+    type: "object"
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: "none"
+  disk: "read_write"
+  subprocess: "allowed"
+resources:
+  gpu: "optional"
+  threads: 4
+

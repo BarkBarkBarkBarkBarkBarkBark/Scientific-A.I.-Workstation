@@ -40,6 +40,13 @@ flowchart LR
 
 ## Run
 
+Create a `.env` file in the project root:
+
+```bash
+OPENAI_API_KEY="sk-..."
+OPENAI_MODEL="gpt-4o-mini"
+```
+
 ```bash
 cd "/Scientific A.I. Workstation"
 npm install
