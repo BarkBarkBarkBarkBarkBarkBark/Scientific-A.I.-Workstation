@@ -76,75 +76,65 @@ export function PluginBrowser() {
     }
     sort(root.children)
 
+    const countPlugins = (n: CatNode): number => {
+      if (n.kind === 'leaf') return n.pluginIds.length
+      return n.children.reduce((acc, c) => acc + countPlugins(c), 0)
+    }
+
+    const renderPluginRow = (pluginId: string) => {
+      const p = byId.get(pluginId)
+      if (!p) return null
+      const disabled = layout.leftCollapsed
+      return (
+        <div
+          key={p.id}
+          draggable={!disabled}
+          onDragStart={(e) => {
+            if (disabled) return
+            e.dataTransfer.setData('application/saw-plugin', p.id)
+            e.dataTransfer.setData('text/plain', p.id)
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          className={[
+            'group flex items-center gap-2 rounded px-1.5 py-1 text-xs',
+            disabled ? 'opacity-60' : 'cursor-grab active:cursor-grabbing hover:bg-zinc-900/60',
+          ].join(' ')}
+          title={
+            disabled
+              ? 'Expand sidebar to drag'
+              : `${p.name}\n\n${p.id}\n\n${p.description}`
+          }
+        >
+          <div className="min-w-0 flex-1 truncate text-zinc-200">{p.name}</div>
+          {p.locked ? (
+            <div className="text-[10px] font-semibold tracking-wide text-amber-200">LOCKED</div>
+          ) : p.origin === 'dev' ? (
+            <div className="text-[10px] text-zinc-500">dev</div>
+          ) : null}
+        </div>
+      )
+    }
+
     const render = (n: CatNode): JSX.Element => {
       if (n.kind === 'leaf') {
         return (
-          <details key={n.path} open className="rounded-md border border-zinc-800 bg-zinc-950/20">
-            <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-semibold text-zinc-300">
+          <details key={n.path} className="select-none">
+            <summary className="cursor-pointer px-1.5 py-1 text-xs font-semibold text-zinc-300 hover:text-zinc-100">
               {n.name}/ <span className="text-zinc-600">({n.pluginIds.length})</span>
             </summary>
-            <div className="space-y-2 p-2">
-              {n.pluginIds.map((id) => {
-                const p = byId.get(id)!
-                return (
-                  <div
-                    key={p.id}
-                    draggable={!layout.leftCollapsed}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('application/saw-plugin', p.id)
-                      e.dataTransfer.setData('text/plain', p.id)
-                      e.dataTransfer.effectAllowed = 'copy'
-                    }}
-                    className={[
-                      'rounded-md border border-zinc-800 bg-zinc-950/40 p-3',
-                      layout.leftCollapsed ? 'opacity-60' : 'cursor-grab active:cursor-grabbing',
-                    ].join(' ')}
-                    title={layout.leftCollapsed ? 'Expand sidebar to drag' : 'Drag to canvas / drop zones'}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold text-zinc-100">{p.name}</div>
-                        {p.locked ? (
-                          <div className="rounded bg-amber-900/30 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
-                            LOCKED
-                          </div>
-                        ) : p.origin === 'dev' ? (
-                          <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
-                            dev
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
-                        v{p.version}
-                      </div>
-                    </div>
-                    <div className="mt-1 text-xs leading-snug text-zinc-400">{p.description}</div>
-                    <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-zinc-500">
-                      {p.outputs.map((o) => (
-                        <span key={o.id} className="rounded bg-zinc-900 px-2 py-0.5">
-                          out:{o.type}
-                        </span>
-                      ))}
-                      {p.inputs.map((i) => (
-                        <span key={i.id} className="rounded bg-zinc-900 px-2 py-0.5">
-                          in:{i.type}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
+            <div className="ml-3 border-l border-zinc-800 pl-2">
+              {n.pluginIds.map((id) => renderPluginRow(id))}
             </div>
           </details>
         )
       }
 
       return (
-        <details key={n.path} open className="rounded-md border border-zinc-800 bg-zinc-950/10">
-          <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-semibold text-zinc-200">
-            {n.name}/
+        <details key={n.path} className="select-none">
+          <summary className="cursor-pointer px-1.5 py-1 text-xs font-semibold text-zinc-200 hover:text-zinc-100">
+            {n.name}/ <span className="text-zinc-700">({countPlugins(n)})</span>
           </summary>
-          <div className="space-y-2 p-2">
+          <div className="ml-3 border-l border-zinc-800 pl-2">
             {n.children.map((c) => render(c))}
           </div>
         </details>
@@ -215,45 +205,32 @@ export function PluginBrowser() {
         {!layout.leftCollapsed && (
           <div className="saw-scroll min-h-0 flex-1 overflow-y-scroll pr-1">
             {q.trim() ? (
-            <div className="space-y-2">
-              {filtered.map((p) => (
-                <div
-                  key={p.id}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('application/saw-plugin', p.id)
-                    e.dataTransfer.setData('text/plain', p.id)
-                    e.dataTransfer.effectAllowed = 'copy'
-                  }}
-                  className="cursor-grab rounded-md border border-zinc-800 bg-zinc-950/40 p-3 active:cursor-grabbing"
-                  title="Drag to canvas / drop zones"
-                >
-                  <div className="flex items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                {filtered.map((p) => (
+                  <div
+                    key={p.id}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/saw-plugin', p.id)
+                      e.dataTransfer.setData('text/plain', p.id)
+                      e.dataTransfer.effectAllowed = 'copy'
+                    }}
+                    className="cursor-grab rounded px-1.5 py-1 text-xs text-zinc-200 hover:bg-zinc-900/60 active:cursor-grabbing"
+                    title={`${p.name}\n\n${p.id}\n\n${p.description}`}
+                  >
                     <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-zinc-100">{p.name}</div>
+                      <div className="min-w-0 flex-1 truncate">{p.name}</div>
                       {p.locked ? (
-                        <div className="rounded bg-amber-900/30 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
-                          LOCKED
-                        </div>
+                        <div className="text-[10px] font-semibold tracking-wide text-amber-200">LOCKED</div>
                       ) : p.origin === 'dev' ? (
-                        <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
-                          dev
-                        </div>
+                        <div className="text-[10px] text-zinc-500">dev</div>
                       ) : null}
                     </div>
-                    <div className="rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
-                      v{p.version}
-                    </div>
                   </div>
-                  <div className="mt-1 text-xs leading-snug text-zinc-400">{p.description}</div>
-                  <div className="mt-1 text-[11px] text-zinc-500">
-                    {p.categoryPath}/
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
           ) : (
-            <div className="space-y-2">{tree}</div>
+              <div className="space-y-0.5">{tree}</div>
           )}
           </div>
         )}

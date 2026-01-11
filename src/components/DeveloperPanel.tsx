@@ -4,6 +4,7 @@ import { Panel } from './ui/Panel'
 import { sourceFiles } from '../dev/sourceFiles'
 import { useSawStore } from '../store/useSawStore'
 import { fetchDevCaps, fetchDevFile, fetchDevTree, setDevCaps, type CapsManifest, type DevTreeNode } from '../dev/runtimeTree'
+import { ResizableDivider } from './ui/ResizableDivider'
 
 type TreeNode =
   | { kind: 'dir'; name: string; path: string; children: TreeNode[] }
@@ -58,7 +59,7 @@ function TreeView(props: {
   renderRight?: (path: string) => JSX.Element | null
 }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-0.5">
       {props.nodes.map((n) => {
         if (n.kind === 'file') {
           const active = n.path === props.selectedPath
@@ -66,10 +67,10 @@ function TreeView(props: {
             <div
               key={n.path}
               className={[
-                'flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 transition',
+                'flex items-center justify-between gap-2 rounded px-1.5 py-1 transition',
                 active
-                  ? 'border-emerald-700 bg-emerald-900/20'
-                  : 'border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900',
+                  ? 'bg-emerald-900/25'
+                  : 'hover:bg-zinc-900/60',
               ].join(' ')}
               title={n.path}
             >
@@ -89,14 +90,14 @@ function TreeView(props: {
         }
 
         return (
-          <details key={n.path} open className="rounded-md border border-zinc-800 bg-zinc-950/20">
-            <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-semibold text-zinc-300">
+          <details key={n.path} className="select-none">
+            <summary className="cursor-pointer px-1.5 py-1 text-xs font-semibold text-zinc-300 hover:text-zinc-100">
               <div className="flex items-center justify-between gap-2">
                 <div className="truncate">{n.name}/</div>
                 {props.renderRight ? props.renderRight(n.path ? n.path + '/' : '.') : null}
               </div>
             </summary>
-            <div className="px-2 pb-2">
+            <div className="ml-3 border-l border-zinc-800 pl-2">
               <TreeView
                 nodes={n.children}
                 selectedPath={props.selectedPath}
@@ -122,6 +123,7 @@ export function DeveloperPanel() {
   const [flags, setFlags] = useState<{ SAW_ENABLE_PATCH_ENGINE: boolean; SAW_ENABLE_DB: boolean; SAW_ENABLE_PLUGINS: boolean } | null>(null)
   const [dbHealth, setDbHealth] = useState<string>('')
   const [pluginsList, setPluginsList] = useState<string>('')
+  const [filesWidth, setFilesWidth] = useState<number>(280)
 
   const selected = useMemo(() => {
     return sourceFiles.find((f) => f.path === selectedPath) ?? sourceFiles[0]
@@ -225,12 +227,11 @@ export function DeveloperPanel() {
     if (!runtimeTree) return null
     const toTreeNode = (n: DevTreeNode): TreeNode => {
       if (n.type === 'file') return { kind: 'file', name: n.name, path: n.path }
-      return {
-        kind: 'dir',
-        name: n.name,
-        path: n.path,
-        children: (n.children ?? []).map(toTreeNode),
-      }
+      return { kind: 'dir', name: n.name, path: n.path, children: (n.children ?? []).map(toTreeNode) }
+    }
+    // Prefer showing top-level entries (not the synthetic root "." node)
+    if (runtimeTree.type === 'dir') {
+      return (runtimeTree.children ?? []).map(toTreeNode)
     }
     return [toTreeNode(runtimeTree)]
   }, [runtimeTree])
@@ -272,7 +273,10 @@ export function DeveloperPanel() {
   }
 
   return (
-    <div className="grid h-full grid-cols-[280px,1fr] gap-2">
+    <div
+      className="grid h-full gap-2"
+      style={{ gridTemplateColumns: `${filesWidth}px 6px 1fr` }}
+    >
       <Panel title="Files" className="h-full overflow-hidden">
         <div className="flex h-full flex-col p-2">
           <div className="flex items-center gap-2">
@@ -448,6 +452,16 @@ export function DeveloperPanel() {
           </div>
         </div>
       </Panel>
+
+      <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+        <ResizableDivider
+          orientation="vertical"
+          value={filesWidth}
+          setValue={setFilesWidth}
+          min={220}
+          max={560}
+        />
+      </div>
 
       <Panel title={selected?.path ?? 'Source'} className="h-full overflow-hidden">
         <div className="h-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">

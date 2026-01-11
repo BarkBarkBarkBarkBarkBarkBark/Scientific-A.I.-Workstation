@@ -16,7 +16,7 @@ export function ResizableDivider(props: {
   return (
     <div
       className={[
-        'group flex items-stretch justify-stretch',
+        'group flex items-stretch justify-stretch select-none touch-none',
         props.orientation === 'vertical' ? 'cursor-col-resize' : 'cursor-row-resize',
       ].join(' ')}
       onPointerDown={(e) => {
@@ -41,8 +41,8 @@ export function ResizableDivider(props: {
       <div
         className={[
           'w-full h-full',
-          'bg-transparent',
-          'group-hover:bg-emerald-700/20',
+          'bg-zinc-800/30',
+          'group-hover:bg-emerald-700/25',
           'transition-colors',
         ].join(' ')}
       />
