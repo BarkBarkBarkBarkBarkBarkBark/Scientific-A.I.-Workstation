@@ -1,3 +1,3 @@
-[submodule "saw-workspace/plugins/zlab_sorting_script"]
+[submodule "saw-workspace/sources/zlab_sorting_script"]
 	path = saw-workspace/sources/zlab_sorting_script
 	url = https://github.com/BarkBarkBarkBarkBarkBarkBark/zlab_sorting_script.git
