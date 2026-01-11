@@ -21,6 +21,9 @@ usage() {
 Usage:
   scripts/dev_all.sh [--frontend-port 7176] [--api-port 5127]
 
+Linux/AWS headless bootstrap:
+  scripts/linux_init.sh --compose-up
+
 Env (optional):
   FRONTEND_PORT=5173
   API_HOST=127.0.0.1
