@@ -73,6 +73,16 @@ export type NodeUiRuntime = {
   viewHeight: number
 }
 
+export type ExecRuntime = {
+  last?: {
+    ok: boolean
+    outputs: any
+    logs: any[]
+    error?: string | null
+    ranAt: number
+  } | null
+}
+
 export type PluginNodeData = {
   pluginId: string
   title: string
@@ -89,6 +99,7 @@ export type PluginNodeData = {
   runtime?: {
     audio?: AudioRuntime
     ui?: NodeUiRuntime
+    exec?: ExecRuntime
   }
 }
 

@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Panel } from './ui/Panel'
 import { useSawStore } from '../store/useSawStore'
+import { PluginBuilderModal } from './PluginBuilderModal'
 
 export function PluginBrowser() {
   const [q, setQ] = useState('')
+  const [builderOpen, setBuilderOpen] = useState(false)
   const layout = useSawStore((s) => s.layout)
   const toggleLeftSidebar = useSawStore((s) => s.toggleLeftSidebar)
   const catalog = useSawStore((s) => s.pluginCatalog)
@@ -145,44 +147,53 @@ export function PluginBrowser() {
   }, [filtered, layout.leftCollapsed])
 
   return (
-    <Panel
-      title="Plugin Browser"
-      right={
-        <div className="flex items-center gap-2">
-          <div className="text-[11px] text-zinc-500">
-            ws:{' '}
-            <span className="font-mono text-zinc-300">
-              {workspacePlugins.length}
-            </span>{' '}
-            total:{' '}
-            <span className="font-mono text-zinc-300">
-              {catalog.length}
-            </span>
+    <>
+      <Panel
+        title="Plugin Browser"
+        right={
+          <div className="flex items-center gap-2">
+            <div className="text-[11px] text-zinc-500">
+              ws:{' '}
+              <span className="font-mono text-zinc-300">
+                {workspacePlugins.length}
+              </span>{' '}
+              total:{' '}
+              <span className="font-mono text-zinc-300">
+                {catalog.length}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBuilderOpen(true)}
+              className="rounded-md bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-zinc-50 hover:bg-emerald-600"
+              title="Create a new workspace plugin from Python"
+            >
+              New…
+            </button>
+            <button
+              type="button"
+              onClick={() => void refreshWorkspacePlugins()}
+              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+              title="Re-fetch workspace plugins from SAW API (/plugins/list)"
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={toggleLeftSidebar}
+              className={[
+                'rounded-md border border-zinc-700 bg-zinc-950 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900',
+                layout.leftCollapsed ? 'px-2 py-1' : 'px-2 py-1',
+              ].join(' ')}
+              aria-label={layout.leftCollapsed ? 'Expand plugin browser' : 'Collapse plugin browser'}
+            >
+              {layout.leftCollapsed ? '⟩' : 'Collapse'}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => void refreshWorkspacePlugins()}
-            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
-            title="Re-fetch workspace plugins from SAW API (/plugins/list)"
-          >
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={toggleLeftSidebar}
-            className={[
-              'rounded-md border border-zinc-700 bg-zinc-950 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900',
-              layout.leftCollapsed ? 'px-2 py-1' : 'px-2 py-1',
-            ].join(' ')}
-            aria-label={layout.leftCollapsed ? 'Expand plugin browser' : 'Collapse plugin browser'}
-          >
-            {layout.leftCollapsed ? '⟩' : 'Collapse'}
-          </button>
-        </div>
-      }
-      className="min-h-0 overflow-hidden"
-    >
-      <div className="flex h-full min-h-0 flex-col gap-2 p-3">
+        }
+        className="min-h-0 overflow-hidden"
+      >
+        <div className="flex h-full min-h-0 flex-col gap-2 p-3">
         {layout.leftCollapsed ? (
           <button
             type="button"
@@ -240,8 +251,10 @@ export function PluginBrowser() {
             Tip: drag a plugin into Pipeline drop zones or Graph canvas.
           </div>
         )}
-      </div>
-    </Panel>
+        </div>
+      </Panel>
+      <PluginBuilderModal open={builderOpen} onClose={() => setBuilderOpen(false)} />
+    </>
   )
 }
 

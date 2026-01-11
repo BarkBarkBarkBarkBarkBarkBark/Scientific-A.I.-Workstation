@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import os
 import re
+import subprocess
+import sys
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
@@ -22,6 +25,7 @@ from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
 from .agent import agent_chat, agent_approve
 from .agent_log import agent_log_path
+from . import env_manager
 from .stock_plugins_catalog import (
     compute_dir_digest_sha256,
     load_stock_catalog,
@@ -669,6 +673,226 @@ def plugins_fork(req: PluginForkRequest) -> PluginForkResponse:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"plugin_fork_failed: {e}")
+
+
+class PluginCreateFromPythonRequest(BaseModel):
+    plugin_id: str
+    name: str
+    description: str = ""
+    category_path: str | None = None
+    version: str = "0.1.0"
+
+    # Code: raw python file content (will be placed into wrapper.py template)
+    python_code: str
+
+    # Minimal IO defaults: one file/path input and one result output.
+    input_id: str = "file"
+    input_type: str = "path"
+    output_id: str = "result"
+    output_type: str = "object"
+
+    # Environment (optional)
+    pip: list[str] = Field(default_factory=list)
+
+    # Safety policies (defaults are conservative)
+    side_effects_network: Literal["none", "restricted", "allowed"] = "none"
+    side_effects_disk: Literal["read_only", "read_write"] = "read_only"
+    side_effects_subprocess: Literal["forbidden", "allowed"] = "forbidden"
+    threads: int = 1
+
+    # Optional: probe after writing files (may install deps if ensure_env=true)
+    probe: bool = True
+    probe_ensure_env: bool = True
+
+
+class PluginProbeResponse(BaseModel):
+    ok: bool
+    plugin_id: str
+    env_key: str | None = None
+    error: str | None = None
+
+
+class PluginCreateFromPythonResponse(BaseModel):
+    ok: bool
+    plugin_id: str
+    plugin_dir: str
+    probed: bool
+    probe: PluginProbeResponse | None = None
+
+
+def _write_text(path: str, content: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def _probe_plugin_dir(
+    *,
+    plugin_id: str,
+    plugin_dir: str,
+    entry_file: str,
+    callable_name: str,
+    env_pip: list[str],
+    ensure_env: bool,
+) -> PluginProbeResponse:
+    try:
+        env_key = None
+        py = sys.executable
+        if ensure_env:
+            er = env_manager.compute_env_resolution(
+                settings=settings,
+                plugin_dir=plugin_dir,
+                plugin_id=plugin_id,
+                plugin_version="0.0.0",
+                env_python=">=3.11,<3.13",
+                env_lockfile=None,
+                env_requirements=None,
+                env_pip=env_pip or [],
+                extras={"cuda": "none"},
+            )
+            env_key = er.env_key
+            py = env_manager.ensure_env(settings, er.env_key, er.deps, plugin_dir=plugin_dir)
+
+        probe_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "plugin_probe.py"))
+        p = subprocess.run(
+            [py, probe_script, "--plugin-dir", plugin_dir, "--entry-file", entry_file, "--callable", callable_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=dict(os.environ),
+        )
+        if p.returncode == 0:
+            return PluginProbeResponse(ok=True, plugin_id=plugin_id, env_key=env_key)
+        raw = (p.stdout.decode("utf-8", errors="ignore") or "").strip()
+        err = raw
+        try:
+            j = json.loads(raw or "{}")
+            if isinstance(j, dict) and isinstance(j.get("error"), str):
+                err = str(j.get("error"))
+        except Exception:
+            pass
+        if not err:
+            err = (p.stderr.decode("utf-8", errors="ignore") or "").strip()[:2000] or "probe_failed"
+        return PluginProbeResponse(ok=False, plugin_id=plugin_id, env_key=env_key, error=err[:4000])
+    except Exception as e:
+        return PluginProbeResponse(ok=False, plugin_id=plugin_id, error=f"{type(e).__name__}: {e}")
+
+
+@app.post("/plugins/create_from_python", response_model=PluginCreateFromPythonResponse)
+def plugins_create_from_python(req: PluginCreateFromPythonRequest) -> PluginCreateFromPythonResponse:
+    pid = (req.plugin_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="missing_plugin_id")
+    if not re.match(r"^[A-Za-z0-9_.-]+$", pid):
+        raise HTTPException(status_code=400, detail="invalid_plugin_id")
+
+    stock = load_stock_catalog()
+    if pid in stock:
+        raise HTTPException(status_code=409, detail="plugin_id_is_locked")
+
+    plugin_dir = os.path.join(settings.workspace_root, "plugins", pid)
+    if os.path.exists(plugin_dir):
+        raise HTTPException(status_code=409, detail="plugin_id_already_exists")
+
+    name = (req.name or pid).strip()
+    if not name:
+        name = pid
+
+    desc = str(req.description or "").strip()
+    cat = (req.category_path or "").strip() or None
+
+    input_id = (req.input_id or "file").strip() or "file"
+    output_id = (req.output_id or "result").strip() or "result"
+    input_type = (req.input_type or "path").strip() or "path"
+    output_type = (req.output_type or "object").strip() or "object"
+
+    # Keep ids filename/key safe-ish
+    if not re.match(r"^[A-Za-z0-9_.-]+$", input_id):
+        raise HTTPException(status_code=400, detail="invalid_input_id")
+    if not re.match(r"^[A-Za-z0-9_.-]+$", output_id):
+        raise HTTPException(status_code=400, detail="invalid_output_id")
+
+    pip = [str(x).strip() for x in (req.pip or []) if str(x).strip()]
+
+    wrapper_user_code = (req.python_code or "").rstrip() + "\n"
+    if not wrapper_user_code.strip():
+        raise HTTPException(status_code=400, detail="missing_python_code")
+
+    wrapper = (
+        '"""SAW Workspace Plugin (generated)\n\n'
+        "Edit this file to integrate your lab code.\n\n"
+        "You can provide either:\n"
+        "  - def main(inputs: dict, params: dict, context) -> dict\n"
+        "or\n"
+        "  - def run(file_path: str, params: dict, context) -> dict\n\n"
+        f'Default input key: "{input_id}" (expects inputs["{input_id}"]["data"])\n'
+        f'Default output key: "{output_id}"\n'
+        '"""\n\n'
+        "from __future__ import annotations\n\n"
+        "from typing import Any\n\n"
+        "# --- user code (start) ---\n"
+        f"{wrapper_user_code}"
+        "# --- user code (end) ---\n\n"
+        "_USER_MAIN = globals().get('main')\n"
+        "_USER_RUN = globals().get('run')\n\n"
+        "def main(inputs: dict, params: dict, context) -> dict:\n"
+        "    # Prefer user-defined main() if present.\n"
+        "    if callable(_USER_MAIN):\n"
+        "        return _USER_MAIN(inputs, params, context)\n"
+        "    # Fallback: call user-defined run(file_path, params, context)\n"
+        "    if callable(_USER_RUN):\n"
+        f"        x = (inputs or {{}}).get('{input_id}') or {{}}\n"
+        "        file_path = x.get('data')\n"
+        "        return {"
+        f"'{output_id}': {{'data': _USER_RUN(file_path, params or {{}}, context), 'metadata': {{}}}}"
+        "}\n"
+        "    raise RuntimeError('missing_entrypoint: define main(inputs, params, context) or run(file_path, params, context)')\n"
+    )
+
+    manifest: dict[str, Any] = {
+        "id": pid,
+        "name": name,
+        "version": str(req.version or "0.1.0"),
+        "description": desc,
+        "category_path": cat,
+        "entrypoint": {"file": "wrapper.py", "callable": "main"},
+        "environment": {"python": ">=3.11,<3.13", "pip": pip},
+        "inputs": {input_id: {"type": input_type}},
+        "params": {},
+        "outputs": {output_id: {"type": output_type}},
+        "execution": {"deterministic": False, "cacheable": False},
+        "side_effects": {
+            "network": req.side_effects_network,
+            "disk": req.side_effects_disk,
+            "subprocess": req.side_effects_subprocess,
+        },
+        "resources": {"gpu": "forbidden", "threads": int(req.threads or 1)},
+    }
+
+    try:
+        os.makedirs(plugin_dir, exist_ok=False)
+        _write_text(os.path.join(plugin_dir, "wrapper.py"), wrapper)
+        with open(os.path.join(plugin_dir, "plugin.yaml"), "w", encoding="utf-8") as f:
+            yaml.safe_dump(manifest, f, sort_keys=False)
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="plugin_id_already_exists")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"plugin_create_failed: {e}")
+
+    probe: PluginProbeResponse | None = None
+    probed = False
+    if bool(req.probe):
+        probed = True
+        probe = _probe_plugin_dir(
+            plugin_id=pid,
+            plugin_dir=plugin_dir,
+            entry_file="wrapper.py",
+            callable_name="main",
+            env_pip=pip,
+            ensure_env=bool(req.probe_ensure_env),
+        )
+
+    return PluginCreateFromPythonResponse(ok=True, plugin_id=pid, plugin_dir=plugin_dir, probed=probed, probe=probe)
 
 
 @app.post("/plugins/execute", response_model=PluginExecuteResponse)

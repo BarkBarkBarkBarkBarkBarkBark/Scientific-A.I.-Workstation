@@ -155,9 +155,39 @@ def execute_plugin(
         env=env,
         check=False,
     )
-    if p.returncode != 0:
-        raise RuntimeError(f"plugin_failed: {p.stderr.decode('utf-8', errors='ignore')[:4000]}")
-    out = json.loads(p.stdout.decode("utf-8"))
+    stdout = p.stdout.decode("utf-8", errors="replace").strip()
+    stderr = p.stderr.decode("utf-8", errors="replace").strip()
+
+    # Persist raw outputs for debugging (even when the process is killed mid-run).
+    try:
+        logs_dir = os.path.join(temp_run_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        # Limit stored size to keep logs readable.
+        max_chars = 200_000
+        open(os.path.join(logs_dir, "stdout.txt"), "w", encoding="utf-8").write(stdout[-max_chars:])
+        open(os.path.join(logs_dir, "stderr.txt"), "w", encoding="utf-8").write(stderr[-max_chars:])
+    except Exception:
+        pass
+
+    # plugin_runner prints JSON result on stdout even on failure.
+    out: dict[str, Any] = {}
+    if stdout:
+        try:
+            parsed = json.loads(stdout)
+            if isinstance(parsed, dict):
+                out = parsed
+        except Exception:
+            out = {}
+
+    # If the runner failed and did not provide a structured payload, raise with best details we have.
+    if p.returncode != 0 and not out:
+        # stderr is often dominated by progress bars; show a tail snippet and point to log files.
+        tail = (stderr or stdout)[-4000:]
+        raise RuntimeError(
+            f"plugin_failed rc={p.returncode}: {tail}\n"
+            f"logs: {os.path.join(temp_run_dir, 'logs')}"
+        )
+
     return out
 
 
