@@ -1,5 +1,5 @@
 {
-  "source": "src/mock/plugins.ts",
+  "source": "services/saw_api (stock plugins) + saw-workspace/plugins (workspace plugins)",
   "plugins": [
     { "id": "audio_lowpass", "cat": "audio/processors", "io": { "in": [], "out": ["Audio"] } },
     { "id": "load_csv", "cat": "data/io", "io": { "in": [], "out": ["DataFrame"] } },

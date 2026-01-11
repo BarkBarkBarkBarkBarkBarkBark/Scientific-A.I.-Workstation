@@ -13,7 +13,7 @@ export function TopBar() {
         <div className="text-sm font-semibold tracking-wide text-zinc-100">
           Scientific AI Workstation
         </div>
-        <div className="text-xs text-zinc-500">Frontend MVP (mock execution)</div>
+        <div className="text-xs text-zinc-500">Frontend MVP (local execution)</div>
       </div>
 
       <div className="flex items-center gap-4">

@@ -303,7 +303,7 @@ runtime_and_execution:
   status_model:
     node_status_enum: ["idle", "running", "error"]
   runner_interface:
-    description: "Abstract execution surface; implementations can be mocked or real."
+    description: "Abstract execution surface; implementations can be simulated or real."
     methods:
       - name: "readFile"
         args: ["path"]
@@ -364,7 +364,7 @@ ui_requirements:
     - "drag_plugin_to_canvas_creates_node"
     - "connections_allowed_only_if_port_types_match"
     - "select_node_populates_inspector"
-    - "describe_goal_generates_mock_plan_and_optional_autoplace"
+    - "describe_goal_generates_fallback_plan_and_optional_autoplace"
     - "editable_mode_enables_code_editor_modal_with_diff_preview"
   persistence:
     - "graph_state_saved_in_workspace/pipelines/*.saw.json"

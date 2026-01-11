@@ -108,7 +108,7 @@ export function ModuleFullscreenModal() {
                         : 'bg-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
                     ].join(' ')}
                   >
-                    {isWorkspacePlugin ? 'Wrapper (Python)' : 'Python (mock)'}
+                    {isWorkspacePlugin ? 'Wrapper (Python)' : 'Python (fallback)'}
                   </button>
                   <div className="ml-auto text-[11px] text-zinc-500">
                     {isWorkspacePlugin ? (

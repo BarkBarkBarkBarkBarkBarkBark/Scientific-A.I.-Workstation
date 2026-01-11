@@ -448,7 +448,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         logs: [...s.logs, '[graph] blocked invalid connection (type mismatch)'],
         errors: [
           ...s.errors,
-          'TypeError: Cannot connect ports with mismatched types (mock validator).',
+          'TypeError: Cannot connect ports with mismatched types.',
         ],
       }))
       return
@@ -891,7 +891,7 @@ const _useSawStore = create<SawState>((set, get) => ({
       ],
     }))
 
-    // Best-effort auto-drop (plan or mock)
+    // Best-effort auto-drop (plan or fallback)
     const suggested: string[] = Array.isArray(plan?.suggestedPlugins) ? plan.suggestedPlugins : []
     if (suggested.length === 0) return
 

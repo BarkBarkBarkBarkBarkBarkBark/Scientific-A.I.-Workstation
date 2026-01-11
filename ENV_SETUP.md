@@ -27,7 +27,7 @@ npm run dev
 
 ## Notes
 
-- If no key is set, the app falls back to a mocked AI planner.
+- If no key is set, the app falls back to a local heuristic planner.
 - This proxy is for **local dev**; for production you’d host a real backend/proxy.
 
 

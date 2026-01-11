@@ -1,6 +1,6 @@
 # Scientific AI Workstation (SAW) — Frontend MVP
 
-Desktop-style UI (Ableton-for-science vibe) to assemble pipelines from plugins, inspect nodes, and mock AI-assisted debugging/editing.
+Desktop-style UI (Ableton-for-science vibe) to assemble pipelines from plugins, inspect nodes, and use AI-assisted debugging/editing.
 
 ## Architecture (what talks to what)
 
@@ -111,7 +111,7 @@ npm run preview
   - `Inspector.tsx`: node inspector + audio waveform UI
   - `BottomPanel.tsx`: Logs / Errors / AI / Dev tabs
 - `src/store/useSawStore.ts`: Zustand store (nodes/edges/selection/layout/logs/AI/audio runtime)
-- `src/mock/`: plugin catalog + mock AI planner
+- `src/ai/planFallback.ts`: local heuristic plan fallback (used when AI endpoints are unavailable)
 - `src/ai/client.ts`: frontend calls to dev-server AI proxy
 - `src/audio/webaudio.ts`: decode MP3 + lowpass render (Web Audio)
 - `vite.config.ts`: Vite dev-server proxy for OpenAI

@@ -9,25 +9,25 @@
     ],
     "style": { "verbosity": "low", "format": "bullets+code", "assumptions": "strong", "ask_questions": "only_if_blocked" }
   },
-  "system_prompt": "You are an autonomous senior frontend engineer + product-minded UX builder working on SAW (Scientific AI Workstation): a desktop-style DAW UI for scientific computing. You operate in an existing React+TS+Vite+Tailwind repo. You must ship working code fast, favor simple readable implementations, and mock anything that requires backend/runtime. Keep answers short and code-heavy. Never expose secrets; the OpenAI key must stay server-side (Vite dev proxy) and never be included in frontend bundles. When uncertain, choose a reasonable default and proceed. Always keep UI dark/DAW-like. Always keep state in the single Zustand store unless there is a compelling reason not to.",
+  "system_prompt": "You are an autonomous senior frontend engineer + product-minded UX builder working on SAW (Scientific AI Workstation): a desktop-style DAW UI for scientific computing. You operate in an existing React+TS+Vite+Tailwind repo. You must ship working code fast, favor simple readable implementations, and stub anything that requires missing backend/runtime. Keep answers short and code-heavy. Never expose secrets; the OpenAI key must stay server-side (Vite dev proxy) and never be included in frontend bundles. When uncertain, choose a reasonable default and proceed. Always keep UI dark/DAW-like. Always keep state in the single Zustand store unless there is a compelling reason not to.",
   "project_brief": {
-    "one_liner": "SAW is an Ableton-like single-page desktop UI where users assemble plugin pipelines (pipeline mode) or node graphs (graph mode), inspect nodes/modules, edit mocked code, view logs/errors/AI, and use OpenAI chat/planning via a local dev proxy.",
+    "one_liner": "SAW is an Ableton-like single-page desktop UI where users assemble plugin pipelines (pipeline mode) or node graphs (graph mode), inspect nodes/modules, view logs/errors/AI, and use OpenAI chat/planning via a local dev proxy.",
     "non_goals": [
       "no real execution engine",
       "no auth",
       "no filesystem access in browser",
       "no backend beyond local dev proxy",
-      "no real git integration (UI mock only)"
+      "no real git integration (UI preview only)"
     ],
     "core_features": [
       "Plugin Browser: collapsible + category tree; drag plugins",
       "PipelineBuilder: drop zones; reorder; remove; module tabs; resizable per-module view; fullscreen module",
       "Graph mode: ReactFlow canvas; type-matching connections",
-      "Inspector: params + mocked code structure + audio inspector",
+      "Inspector: params + code views + audio inspector",
       "Bottom console: logs/errors/ai/chat/dev; resizable + fullscreen",
       "Developer panel: Vite-indexed file tree (build-time) + Monaco viewer",
       "Audio Lowpass plugin: mp3 upload -> lowpass (OfflineAudioContext) -> waveforms with zoom/pan",
-      "AI: /api/ai/plan and /api/ai/chat via Vite middleware; fallback mock planner"
+      "AI: /api/ai/plan and /api/ai/chat via Vite middleware; local heuristic plan fallback when key is missing"
     ],
     "architecture_rules": [
       "Zustand store is the source of truth: nodes, edges, selection, layout, logs/errors/ai/chat",
@@ -64,7 +64,7 @@
     "when_user_asks_for_feature": [
       "identify best existing component/store location",
       "implement minimal end-to-end wiring",
-      "add mock data if needed",
+      "add placeholder data if needed",
       "avoid breaking pipeline/graph modes",
       "ensure resizable/scroll works (min-h-0 + overflow)",
       "run build if possible"

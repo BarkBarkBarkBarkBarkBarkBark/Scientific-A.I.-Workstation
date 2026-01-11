@@ -1,0 +1,40 @@
+agent_transparency_mvp:
+  goal: "Cursor-like transparent agent runs: tool calls + sandbox exec + patch proposals + Monaco diff acceptance."
+
+  runtime:
+    service: "saw_api"
+    mode: "local_http"
+    emits: ["agent_run_started", "tool_call", "tool_result", "patch_proposal", "validation_result", "agent_run_finished"]
+
+  trace:
+    persistence: "postgres"
+    tables: ["saw_ops.audit_event", "saw_ops.patch_proposal"]
+    store:
+      - "tool_call.args"
+      - "tool_result.stdout_stderr_exitcode"
+      - "retrieved_context_refs"
+      - "patch_proposal.unified_diff"
+      - "user_decision.accept_reject"
+
+  tools_min:
+    read_only:
+      - { id: "search.grep", impl: "rg", allow_paths: ["workspace/**"] }
+      - { id: "fs.read_file", max_bytes: 20000, allow_paths: ["workspace/**"] }
+      - { id: "fs.list_dir", allow_paths: ["workspace/**"] }
+    sandbox_exec:
+      - { id: "exec.run", cwd: "tempdir", network: "deny_by_default" }
+    patching:
+      - { id: "patch.propose", format: "unified_diff" }
+      - { id: "patch.dry_run_apply", method: "git apply --check" }
+      - { id: "patch.apply", requires: ["editable_mode_on", "allowlist_ok", "denylist_ok"] }
+
+  ui:
+    chat:
+      shows:
+        - "collapsible_step_list"
+        - "per_step_args_outputs"
+        - "stdout_stderr_viewer"
+    patch_review:
+      diff_viewer: "monaco_diff_editor"
+      must_show: ["summary", "rationale", "files_changed", "unified_diff_per_file", "validation_results", "risk_level"]
+      actions: ["accept_apply", "reject", "copy_diff"]

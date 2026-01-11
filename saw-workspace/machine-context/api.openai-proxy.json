@@ -30,7 +30,7 @@
   ],
   "notes": [
     "Used only for local dev; production would require real backend/proxy.",
-    "If key missing, UI falls back to mock planner; chat reports error."
+    "If key missing, UI falls back to a local heuristic planner; chat reports error."
   ]
 }
 
