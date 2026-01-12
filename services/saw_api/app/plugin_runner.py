@@ -13,6 +13,7 @@ from typing import Any
 @dataclass
 class Context:
     logs: list[dict[str, Any]]
+    services: list[dict[str, Any]]
     log_file: str | None = None
 
     def log(self, level: str, event: str, **fields: Any) -> None:
@@ -25,6 +26,17 @@ class Context:
                     f.write(json.dumps(item, ensure_ascii=False) + "\n")
             except Exception:
                 pass
+
+    def service(self, **fields: Any) -> None:
+        """
+        Register a long-lived service started by the plugin (e.g., a web UI).
+        Expected keys (best-effort): name, pid, port, url, status, service_id.
+        """
+        try:
+            self.services.append({str(k): _jsonable(v) for k, v in fields.items()})
+        except Exception:
+            # never fail plugin execution due to service metadata
+            pass
 
 
 def load_callable(plugin_dir: str, entry_file: str, callable_name: str):
@@ -125,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     if is_run_mode and run_dir:
         log_file = os.path.join(run_dir, "logs", "context.ndjson")
 
-    ctx = Context(logs=[], log_file=log_file)
+    ctx = Context(logs=[], services=[], log_file=log_file)
     started = time.time()
     try:
         fn = load_callable(plugin_dir, entry_file, callable_name)
@@ -141,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "ok": ok,
         "outputs": _jsonable(out),
-        "services": [],
+        "services": _jsonable(ctx.services),
         "metrics": {
             "started_at": started,
             "finished_at": finished,

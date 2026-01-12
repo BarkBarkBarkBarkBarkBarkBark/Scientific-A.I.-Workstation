@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
+import socket
+import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -107,6 +111,127 @@ def _write_output_json(name: str, payload: dict[str, Any]) -> str | None:
     return str(p.name)  # relative to output/
 
 
+def _allocate_free_port(host: str = "127.0.0.1") -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind((host, 0))
+        return int(s.getsockname()[1])
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _wait_for_tcp(host: str, port: int, timeout_s: float = 10.0) -> bool:
+    """
+    Return True once TCP connect succeeds to host:port (within timeout), else False.
+    """
+    deadline = time.time() + float(timeout_s)
+    while time.time() < deadline:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        try:
+            s.connect((host, int(port)))
+            return True
+        except Exception:
+            time.sleep(0.2)
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+    return False
+
+
+def _launch_sigui_web(
+    *,
+    context: Any,
+    analyzer_folder: Path,
+    address: str = "0.0.0.0",
+    port: int | None = None,
+    name: str = "SpikeInterface GUI",
+) -> dict[str, Any]:
+    """
+    Launch SpikeInterface GUI (web mode) as a detached subprocess.
+    Returns a service dict compatible with SAW's service recorder.
+    """
+    run_dir = os.environ.get("SAW_RUN_DIR") or ""
+    logs_dir = Path(run_dir) / "logs" if run_dir else Path.cwd()
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / "sigui.log"
+
+    port_i = int(port) if port else _allocate_free_port(host=address if address != "0.0.0.0" else "127.0.0.1")
+
+    # Use the venv's console script directly for reliability.
+    #
+    # IMPORTANT: don't use Path(sys.executable).resolve() here — in some setups
+    # the venv python is a symlink to a conda base interpreter, and resolve()
+    # would incorrectly point us at conda's bin/ (missing `sigui`).
+    venv_bin = Path(sys.executable).parent
+    candidates = [venv_bin / "sigui", venv_bin / "sigui.exe"]
+    sigui = next((p for p in candidates if p.exists()), None)
+    if not sigui:
+        which = shutil.which("sigui")
+        if which:
+            sigui = Path(which)
+    if not sigui:
+        raise FileNotFoundError(
+            f"Could not find `sigui` executable. Tried: {', '.join(str(p) for p in candidates)}"
+        )
+
+    cmd = [
+        str(sigui),
+        str(analyzer_folder),
+        "--mode",
+        "web",
+        "--curation",
+        "--address",
+        str(address),
+        "--port",
+        str(port_i),
+    ]
+
+    with open(log_path, "a", encoding="utf-8") as f:
+        p = subprocess.Popen(  # noqa: S603,S607
+            cmd,
+            stdout=f,
+            stderr=subprocess.STDOUT,
+            cwd=str(analyzer_folder),
+            start_new_session=True,
+        )
+
+    # Wait briefly for the server to bind, otherwise surface the reason from logs.
+    ok = _wait_for_tcp("127.0.0.1", port_i, timeout_s=10.0)
+    if not ok:
+        rc = p.poll()
+        tail = ""
+        try:
+            tail = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-80:])
+        except Exception:
+            tail = ""
+        if rc is not None:
+            raise RuntimeError(f"SIGUI exited immediately (rc={rc}). Last log lines:\n{tail}")
+        raise TimeoutError(f"SIGUI did not open port {port_i} within 10s. Last log lines:\n{tail}")
+
+    # "url" is best-effort; in remote setups you'll likely port-forward.
+    service = {
+        "name": name,
+        "pid": int(p.pid) if p.pid else None,
+        "port": int(port_i),
+        "url": f"http://127.0.0.1:{port_i}",
+        "status": "running",
+    }
+    # Newer runner supports context.service(); fallback to a log-only record.
+    if hasattr(context, "service") and callable(getattr(context, "service")):
+        try:
+            context.service(**service)
+        except Exception:
+            pass
+    context.log("info", "zsort:sigui_launched", **service, cmd=" ".join(cmd), log_path=str(log_path))
+    return service
+
+
 def main(inputs: dict, params: dict, context) -> dict:
     _configure_logging(context)
     context.log(
@@ -134,6 +259,9 @@ def main(inputs: dict, params: dict, context) -> dict:
         stream_id = str((params or {}).get("stream_id") or "0")
         probe_json = str((params or {}).get("probe_json") or "").strip()
         step = str((params or {}).get("step") or "sort_analyze").strip().lower()
+        sigui_address = str((params or {}).get("sigui_address") or "0.0.0.0").strip()
+        sigui_port_raw = (params or {}).get("sigui_port")
+        sigui_port = int(sigui_port_raw) if str(sigui_port_raw or "").strip() else None
 
         context.log(
             "info",
@@ -147,6 +275,34 @@ def main(inputs: dict, params: dict, context) -> dict:
         )
 
         path_dict = zsort.set_paths(patient, session)
+
+        # GUI-only mode: do not run sorting/analyzing/curation, just launch SIGUI for an existing analyzer folder.
+        if step in ("gui", "launch_gui", "sigui"):
+            analyzer_folder = Path(path_dict["analyzer_folder"])
+            if not analyzer_folder.exists():
+                raise FileNotFoundError(
+                    f"Analyzer folder does not exist: {analyzer_folder}\n"
+                    'Run step="analyze" (or "sort_analyze") first.'
+                )
+            service = _launch_sigui_web(
+                context=context,
+                analyzer_folder=analyzer_folder,
+                address=sigui_address,
+                port=sigui_port,
+                name=f"SIGUI curation: {patient}/{session}",
+            )
+            return {
+                "summary": {
+                    "data": {
+                        "patient": patient,
+                        "session": session,
+                        "step": step,
+                        "analyzer_folder": str(analyzer_folder),
+                        "sigui": service,
+                    },
+                    "metadata": {},
+                }
+            }
 
         # Load recording
         if recording_path:
@@ -192,7 +348,31 @@ def main(inputs: dict, params: dict, context) -> dict:
                 if sorting is None:
                     sorting = zsort.sort_stuff(rec, path_dict)
                 analyzer = zsort.analyze_stuff(rec, sorting, path_dict)
-            curated = zsort.save_curated_data(patient, session, analyzer, path_dict)
+            try:
+                curated = zsort.save_curated_data(patient, session, analyzer, path_dict)
+            except FileNotFoundError as e:
+                # If the user hasn't saved curation yet, launch the GUI instead of failing.
+                analyzer_folder = Path(path_dict["analyzer_folder"])
+                service = _launch_sigui_web(
+                    context=context,
+                    analyzer_folder=analyzer_folder,
+                    address=sigui_address,
+                    port=sigui_port,
+                    name=f"SIGUI curation: {patient}/{session}",
+                )
+                return {
+                    "summary": {
+                        "data": {
+                            "patient": patient,
+                            "session": session,
+                            "step": step,
+                            "message": str(e),
+                            "analyzer_folder": str(analyzer_folder),
+                            "sigui": service,
+                        },
+                        "metadata": {},
+                    }
+                }
         if need_figures():
             if curated is None:
                 raise RuntimeError('figures requires "curate" step first (needs curated analyzer).')
