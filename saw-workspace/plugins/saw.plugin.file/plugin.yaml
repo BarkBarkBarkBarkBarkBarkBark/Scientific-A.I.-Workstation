@@ -8,19 +8,6 @@ entrypoint:
   callable: "main"
 environment:
   python: ">=3.11,<3.13"
-inputs:
-  repo_url:
-    type: "string"
-    description: "Git repo URL to clone into saw-workspace/sources (optional)."
-  user_request:
-    type: "text"
-    description: "User description of desired plugin behavior (optional)."
-  code_path:
-    type: "path"
-    description: "Workspace-relative path to code or notebook (optional)."
-  code_snippet:
-    type: "text"
-    description: "Inline code snippet to wrap (optional)."
 params:
   plugin_name:
     type: "string"
@@ -30,6 +17,10 @@ params:
     type: "string"
     default: ""
     ui: { label: "Plugin description" }
+  repo_url:
+    type: "string"
+    default: ""
+    ui: { label: "Repo URL (optional)" }
 outputs:
   result:
     type: "object"
