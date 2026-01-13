@@ -2,6 +2,10 @@
 
 Desktop-style UI (Ableton-for-science vibe) to assemble pipelines from plugins, inspect nodes, and use AI-assisted debugging/editing.
 
+**What this is:** a local-first dev environment (frontend + API + Patch Engine) where an agent can propose file changes, and you explicitly approve any writes.
+
+**What this is not:** a hosted SaaS or a production-hardened runtime (yet). This repo is intentionally “safe-by-default” for local experimentation.
+
 ## Architecture (what talks to what)
 
 The “agent can edit files” because the UI talks to a **tool-calling agent** (SAW API), which proxies safe filesystem operations through the **Patch Engine**.
@@ -26,6 +30,10 @@ flowchart LR
   - both can run validation and auto-rollback on failure (Patch Engine feature)
 - **Workspace sandbox**: `saw-workspace/` is the intended “agent-writable” area. `todo.md` lives there.
 
+In practice this means:
+- The agent can *read* most repo files.
+- The agent can only *write* paths you’ve allowed via Patch Engine caps, and each write is gated by an approval in the UI.
+
 ### Key code paths
 
 - **Frontend**
@@ -40,11 +48,19 @@ flowchart LR
 
 ## Run
 
+### Prerequisites
+
+- Node.js (recommended: current LTS)
+- Python 3.11+ (for the SAW API)
+- Docker (for Postgres + pgvector if you enable DB features)
+
+If you don’t need the DB, you can still run the frontend + API without Docker.
+
 Create a `.env` file in the project root:
 
 ```bash
 OPENAI_API_KEY="sk-..."
-OPENAI_MODEL="gpt-4o-mini"
+OPENAI_MODEL="gpt-4o-mini"  # or another supported model
 ```
 
 ```bash
@@ -52,6 +68,12 @@ cd "/Scientific A.I. Workstation"
 npm install
 npm run dev
 ```
+
+### Default local URLs
+
+- Frontend (Vite): `http://127.0.0.1:5173/` (unless you override the port)
+- SAW API (uvicorn): `http://127.0.0.1:5127/` (in the recommended script below)
+- Postgres (docker compose): `127.0.0.1:54329`
 
 ## Package Index
 
@@ -65,6 +87,8 @@ Starts: Postgres (pgvector) + SAW API + frontend.
 ```bash
 ./scripts/dev_all_mac.sh --frontend-port 7176 --api-port 5127
 ```
+
+Then open: `http://127.0.0.1:7176/`
 
 **Windows (PowerShell):**
 ```powershell
@@ -90,6 +114,8 @@ export SAW_ENABLE_DB=1
 export SAW_ENABLE_PLUGINS=1
 npm run dev
 ```
+
+If you run the API on a non-default port, make sure the frontend proxy (see `vite.config.ts`) points at the same port.
 
 
 
@@ -173,6 +199,20 @@ def main(inputs: dict, params: dict, context) -> dict:
   return {"y": {"data": "ok", "metadata": {}}}
 ```
 
+### Creating a new plugin (two paths)
+
+1) **Via the SAW API helper (recommended for quick iteration):**
+
+- POST `http://127.0.0.1:5127/plugins/create_from_python`
+- This endpoint generates:
+  - `saw-workspace/plugins/<plugin_id>/plugin.yaml`
+  - `saw-workspace/plugins/<plugin_id>/wrapper.py`
+
+2) **Via the agent tool loop (approval-gated):**
+
+- The agent will request approval to write the same files.
+- This is useful when you want the agent to scaffold/refactor the plugin while keeping every write explicitly approved.
+
 ## Core UX
 
 ### Layout Modes
@@ -199,4 +239,17 @@ Plugin: **Audio Lowpass**
 The browser calls a local dev proxy (`/api/ai/*`) so the API key is **not exposed to the frontend bundle**.
 
 See `ENV_SETUP.md`.
+
+## Troubleshooting
+
+- **`npm run build` fails with “Merge conflict marker encountered”**
+  - One or more files still contain `<<<<<<<` / `=======` / `>>>>>>>` markers.
+  - Fix those conflicts, then rerun `npm run build`.
+
+- **Agent says “Approval required” and nothing happens**
+  - That’s expected: approve the tool call in the UI.
+  - If approval succeeds but the write still fails, check Patch Engine caps (`.saw/caps.json`).
+
+- **Plugin creation fails with “directory not found”**
+  - The plugin folder must exist (or the writer must create it). Newer Patch Engine writes create parent dirs automatically; if you’re on an older version, update/restart services.
 
