@@ -61,6 +61,12 @@ export const PluginManifestSchema = z.object({
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>
 
+export type CreatePluginToolArgs = {
+  manifest: PluginManifest
+  wrapper_code: string
+  readme: string
+}
+
 export type CreateDiceRollerParams = {
   pluginId: string
   name?: string
@@ -114,6 +120,98 @@ export function buildDiceRollerWrapper(): string {
     '    context.log("info", "dice_roller:rolls", rolls=rolls, num_dice=num_dice, num_sides=num_sides)\n' +
     '    return {"rolls": {"data": rolls, "metadata": {"count": len(rolls)}}}\n'
   )
+}
+
+function buildGeneratedWrapperFromUserCode(args: {
+  pythonCode: string
+  inputId: string
+  outputId: string
+}): string {
+  const userCode = (args.pythonCode ?? '').replace(/\s+$/, '') + '\n'
+  return (
+    '"""SAW Workspace Plugin (generated)\n\n' +
+    'Edit this file to integrate your lab code.\n\n' +
+    'You can provide either:\n' +
+    '  - def main(inputs: dict, params: dict, context) -> dict\n' +
+    'or\n' +
+    '  - def run(file_path: str, params: dict, context) -> dict\n\n' +
+    `Default input key: "${args.inputId}" (expects inputs["${args.inputId}"]["data"])\n` +
+    `Default output key: "${args.outputId}"\n` +
+    '"""\n\n' +
+    'from __future__ import annotations\n\n' +
+    'from typing import Any\n\n' +
+    '# --- user code (start) ---\n' +
+    userCode +
+    '# --- user code (end) ---\n\n' +
+    "_USER_MAIN = globals().get('main')\n" +
+    "_USER_RUN = globals().get('run')\n\n" +
+    'def main(inputs: dict, params: dict, context) -> dict:\n' +
+    '    # Prefer user-defined main() if present.\n' +
+    '    if callable(_USER_MAIN):\n' +
+    '        return _USER_MAIN(inputs, params, context)\n' +
+    '    # Fallback: call user-defined run(file_path, params, context)\n' +
+    '    if callable(_USER_RUN):\n' +
+    `        x = (inputs or {}).get('${args.inputId}') or {}\n` +
+    '        file_path = x.get(' + "'data'" + ')\n' +
+    `        return {'${args.outputId}': {'data': _USER_RUN(file_path, params or {}, context), 'metadata': {}}}\n` +
+    "    raise RuntimeError('missing_entrypoint: define main(inputs, params, context) or run(file_path, params, context)')\n"
+  )
+}
+
+/**
+ * Build arguments for the backend agent tool `create_plugin`.
+ *
+ * Key point: returns a JSON manifest object (not YAML text), which avoids
+ * accidental stringification in tool calls.
+ */
+export function buildCreatePluginToolArgsFromPython(args: {
+  pluginId: string
+  name?: string
+  description?: string
+  categoryPath?: string | null
+  pythonCode: string
+  inputId?: string
+  inputType?: string
+  outputId?: string
+  outputType?: string
+  pip?: string[]
+  sideEffects?: { network?: 'none' | 'restricted' | 'allowed'; disk?: 'read_only' | 'read_write'; subprocess?: 'forbidden' | 'allowed' }
+  threads?: number
+}): CreatePluginToolArgs {
+  const inputId = args.inputId ?? 'file'
+  const outputId = args.outputId ?? 'result'
+
+  const manifest: PluginManifest = {
+    id: args.pluginId,
+    name: args.name ?? args.pluginId,
+    version: '0.1.0',
+    description: args.description ?? '',
+    category_path: args.categoryPath ?? null,
+    entrypoint: { file: 'wrapper.py', callable: 'main' },
+    environment: { python: '>=3.11,<3.13', pip: args.pip ?? [] },
+    inputs: { [inputId]: { type: args.inputType ?? 'path' } },
+    params: {},
+    outputs: { [outputId]: { type: args.outputType ?? 'object' } },
+    execution: { deterministic: false, cacheable: false },
+    side_effects: {
+      network: args.sideEffects?.network ?? 'none',
+      disk: args.sideEffects?.disk ?? 'read_only',
+      subprocess: args.sideEffects?.subprocess ?? 'forbidden',
+    },
+    resources: { gpu: 'forbidden', threads: args.threads ?? 1 },
+  }
+
+  PluginManifestSchema.parse(manifest)
+
+  const wrapper_code = buildGeneratedWrapperFromUserCode({
+    pythonCode: args.pythonCode,
+    inputId,
+    outputId,
+  })
+
+  const readme = `# ${manifest.name}\n\n${manifest.description || ''}\n`
+
+  return { manifest, wrapper_code, readme }
 }
 
 export async function createPluginFromPython(apiBase: string, args: {

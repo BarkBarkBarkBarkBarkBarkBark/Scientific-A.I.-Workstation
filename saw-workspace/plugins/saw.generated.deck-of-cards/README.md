@@ -1,0 +1,1 @@
+# Deck of Cards Plugin\n\nThis plugin simulates a deck of standard playing cards without replacement. You can draw cards from the deck.

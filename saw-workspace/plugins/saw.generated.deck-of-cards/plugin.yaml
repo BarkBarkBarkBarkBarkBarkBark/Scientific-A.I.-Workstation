@@ -1,0 +1,28 @@
+id: saw.generated.deck-of-cards
+name: Deck of Cards
+version: 0.1.0
+description: A plugin to simulate a deck of standard playing cards without replacement.
+category_path: games
+entrypoint:
+  file: wrapper.py
+  callable: main
+environment:
+  python: '>=3.11,<3.13'
+  pip: []
+inputs: {}
+params: {}
+outputs:
+  deck:
+    type: array
+  drawn:
+    type: object
+execution:
+  deterministic: true
+  cacheable: false
+side_effects:
+  network: none
+  disk: read_only
+  subprocess: forbidden
+resources:
+  gpu: forbidden
+  threads: 1

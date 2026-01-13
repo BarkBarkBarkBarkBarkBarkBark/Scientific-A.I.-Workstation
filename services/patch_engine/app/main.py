@@ -924,6 +924,10 @@ def safe_write(body: SafeWriteRequest) -> dict[str, Any]:
     write_recovery({"inProgress": True, "startedAt": int(time.time() * 1000), "preHead": pre_head, "hadStash": had_stash, "stashRef": stash_ref, "op": "write", "path": rel})
     append_session({"type": "safe.write.start", "path": rel, "preHead": pre_head})
     try:
+        # Ensure parent directories exist for new files (e.g. creating a new plugin folder).
+        parent = os.path.dirname(resolved.abs)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(resolved.abs, "w", encoding="utf-8") as f:
             f.write(str(body.content or ""))
 

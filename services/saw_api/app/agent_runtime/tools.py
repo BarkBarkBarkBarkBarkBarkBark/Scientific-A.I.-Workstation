@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Any
 
 import yaml
@@ -300,7 +301,7 @@ TOOLS: list[dict[str, Any]] = [
                             "side_effects": {
                                 "type": "object",
                                 "properties": {
-                                    "network": {"type": "string", "enum": ["none", "allowed"]},
+                                    "network": {"type": "string", "enum": ["none", "restricted", "allowed"]},
                                     "disk": {"type": "string", "enum": ["read_only", "read_write"]},
                                     "subprocess": {"type": "string", "enum": ["forbidden", "allowed"]},
                                 },
@@ -313,7 +314,7 @@ TOOLS: list[dict[str, Any]] = [
                                     "gpu": {"type": "string", "enum": ["forbidden", "optional", "required"]},
                                     "threads": {"type": "integer"},
                                 },
-                                "required": ["gpu", "threads"],
+                                "required": ["gpu"],
                                 "additionalProperties": True,
                             },
                         },
@@ -322,7 +323,6 @@ TOOLS: list[dict[str, Any]] = [
                             "name",
                             "version",
                             "description",
-                            "category_path",
                             "entrypoint",
                             "environment",
                             "inputs",
@@ -343,6 +343,29 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
 ]
+
+
+def _coerce_manifest(arg: Any) -> dict[str, Any]:
+    """Accept dict or YAML/JSON string; return dict or {}."""
+
+    if isinstance(arg, dict):
+        return arg
+    if isinstance(arg, str) and arg.strip():
+        s = arg.strip()
+        # Try JSON first for speed/clarity; fall back to YAML.
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+        try:
+            parsed = yaml.safe_load(s)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
 
 
 def run_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -375,12 +398,10 @@ def run_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "git_commit":
         return tool_git_commit(message=str(args.get("message") or ""))
     if name == "validate_plugin_manifest":
-        m = args.get("manifest")
-        return tool_validate_plugin_manifest(manifest=m if isinstance(m, dict) else {})
+        return tool_validate_plugin_manifest(manifest=_coerce_manifest(args.get("manifest")))
     if name == "create_plugin":
-        m = args.get("manifest")
         return tool_create_plugin(
-            manifest=m if isinstance(m, dict) else {},
+            manifest=_coerce_manifest(args.get("manifest")),
             wrapper_code=str(args.get("wrapper_code") or ""),
             readme=str(args.get("readme") or ""),
         )
