@@ -19,7 +19,11 @@ PATCH_ENGINE_URL="${SAW_PATCH_ENGINE_URL:-http://${PATCH_ENGINE_HOST}:${PATCH_EN
 
 SAW_ENABLE_DB="${SAW_ENABLE_DB:-1}"
 SAW_ENABLE_PLUGINS="${SAW_ENABLE_PLUGINS:-1}"
-SAW_PATCH_APPLY_ALLOWLIST="${SAW_PATCH_APPLY_ALLOWLIST:-.}"
+SAW_PATCH_APPLY_ALLOWLIST="${SAW_PATCH_APPLY_ALLOWLIST:-saw-workspace/}"
+
+# Allow safe_write/apply_patch to touch todo + workspace files
+export SAW_PATCH_APPLY_ALLOWLIST
+
 
 RELOAD_MODE=1
 
@@ -137,6 +141,12 @@ trap cleanup INT TERM EXIT
 
 log "root: $ROOT_DIR"
 
+mkdir -p "$ROOT_DIR/.saw" "$ROOT_DIR/saw-workspace"
+touch "$ROOT_DIR/.saw/caps.json" "$ROOT_DIR/saw-workspace/todo.md"
+chmod 700 "$ROOT_DIR/.saw" || true
+chmod 600 "$ROOT_DIR/.saw/caps.json" || true
+
+
 # Start postgres if docker is available + compose file exists
 if command -v docker >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
   select_docker_invocation
@@ -146,9 +156,13 @@ else
   warn "docker or docker-compose.yml not found; skipping postgres startup"
 fi
 
+if ! command -v python >/dev/null 2>&1; then
+  die "python not found on PATH"
+fi
+
 if [[ ! -d ".venv" ]]; then
   log "creating .venv..."
-  python3 -m venv .venv
+  python -m venv .venv
 fi
 
 # shellcheck disable=SC1091

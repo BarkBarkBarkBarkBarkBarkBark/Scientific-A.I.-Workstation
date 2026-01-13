@@ -7,11 +7,13 @@ entrypoint:
   file: "wrapper.py"
   callable: "main"
 environment:
-  python: ">=3.11,<3.13"
+  python: ">=3.11,<3.14"
   # Keep this as a plain pip list so SAW doesn't try to `-e .` from requirements.txt.
   pip:
     - "spikeinterface[full]==0.103.0"
     - "spikeinterface-gui==0.11.0"
+    - "panel>=1.5.0"
+    - "param>=2.1.0"
     - "kilosort==4.1.1"
     - "sortingview"
 inputs: {}
@@ -39,7 +41,15 @@ params:
   step:
     type: "string"
     default: "sort_analyze"
-    ui: { label: "Step: sort | analyze | sort_analyze | curate | figures | all" }
+    ui: { label: "Step: sort | analyze | sort_analyze | curate (launch GUI if needed) | gui | figures | all" }
+  sigui_address:
+    type: "string"
+    default: "127.0.0.1"
+    ui: { label: "SIGUI web address (0.0.0.0 for port-forwarding)" }
+  sigui_port:
+    type: "string"
+    default: ""
+    ui: { label: "SIGUI web port (blank = auto)" }
 outputs:
   summary:
     type: "object"
@@ -47,7 +57,7 @@ execution:
   deterministic: false
   cacheable: false
 side_effects:
-  network: "none"
+  network: "restricted"
   disk: "read_write"
   subprocess: "allowed"
 resources:

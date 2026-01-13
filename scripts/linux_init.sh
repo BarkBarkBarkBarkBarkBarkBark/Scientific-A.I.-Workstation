@@ -50,10 +50,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 SUDO=""
+SUDO_KEEPALIVE_PID=""
+DOCKER=("docker") # will be upgraded to ("sudo" "docker") if needed
+
+docker_cmd() { "${DOCKER[@]}" "$@"; }
+
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1; then
-    # -n: non-interactive (fail fast if sudo requires a password)
-    SUDO="sudo -n"
+    log "Requesting sudo password (may prompt once)..."
+    sudo -v || die "sudo authentication failed"
+
+    (
+      while true; do
+        sudo -n true 2>/dev/null || exit 0
+        sleep 60
+      done
+    ) &
+    SUDO_KEEPALIVE_PID="$!"
+    trap 'kill "${SUDO_KEEPALIVE_PID}" 2>/dev/null || true' EXIT
+
+    SUDO="sudo"
   else
     die "Need root privileges (sudo not found). Re-run as root."
   fi
@@ -98,12 +114,33 @@ start_docker_service() {
   warn "Could not start docker automatically (no systemctl/service)."
 }
 
-ensure_docker_running() {
+select_docker_invocation() {
+  # Decide whether docker should be run as the current user or via sudo.
+  # This avoids false "daemon not reachable" errors when it's just socket permissions.
   if ! command -v docker >/dev/null 2>&1; then
     return
   fi
 
   if docker info >/dev/null 2>&1; then
+    DOCKER=("docker")
+    return
+  fi
+
+  if [[ -n "${SUDO}" ]] && sudo -n docker info >/dev/null 2>&1; then
+    DOCKER=("sudo" "docker")
+    warn "Docker requires sudo for this user. Using sudo docker for this run."
+    warn "Tip: add your user to the docker group + reconnect SSH to run docker without sudo."
+    return
+  fi
+}
+
+ensure_docker_running() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return
+  fi
+
+  select_docker_invocation
+  if docker_cmd info >/dev/null 2>&1; then
     log "docker daemon is running"
     return
   fi
@@ -112,14 +149,17 @@ ensure_docker_running() {
   start_docker_service || true
 
   for _ in $(seq 1 30); do
-    if docker info >/dev/null 2>&1; then
+    select_docker_invocation
+    if docker_cmd info >/dev/null 2>&1; then
       log "docker daemon is running"
       return
     fi
     sleep 0.25
   done
 
-  warn "docker daemon still not reachable. If you are not root, try: sudo docker info"
+  warn "docker daemon still not reachable."
+  warn "Check: sudo systemctl status docker --no-pager -n 50"
+  warn "Or try: sudo docker info"
 }
 
 ensure_docker() {
@@ -128,69 +168,70 @@ ensure_docker() {
     return
   fi
 
-local pm
-pm="$(detect_pm)"
-log "Installing prerequisites ($pm)..."
-pm_install "$pm" ca-certificates curl git
+  local pm
+  pm="$(detect_pm)"
+  log "Installing prerequisites ($pm)..."
+  pm_install "$pm" ca-certificates curl git
 
-log "Installing Docker Engine via get.docker.com (non-interactive)..."
-curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-${SUDO} sh /tmp/get-docker.sh
+  log "Installing Docker Engine via get.docker.com (non-interactive)..."
+  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  ${SUDO} sh /tmp/get-docker.sh
 
-start_docker_service
+  start_docker_service
 
-log "Docker installed: $(docker --version 2>/dev/null || echo 'unknown')"
+  log "Docker installed: $(docker --version 2>/dev/null || echo 'unknown')"
 
-if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  if getent group docker >/dev/null 2>&1; then
-    ${SUDO} usermod -aG docker "${USER}" || true
-    warn "Added ${USER} to docker group. You MUST log out/in (or reconnect SSH) to use docker without sudo."
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    if getent group docker >/dev/null 2>&1; then
+      ${SUDO} usermod -aG docker "${USER}" || true
+      warn "Added ${USER} to docker group. You MUST log out/in (or reconnect SSH) to use docker without sudo."
+    fi
   fi
-fi
 }
 
 ensure_docker_compose() {
-  if docker compose version >/dev/null 2>&1; then
+  select_docker_invocation
+  if docker_cmd compose version >/dev/null 2>&1; then
     log "docker compose already available"
     return
   fi
 
-local pm
-pm="$(detect_pm)"
-log "Installing docker compose plugin via package manager ($pm)..."
+  local pm
+  pm="$(detect_pm)"
+  log "Installing docker compose plugin via package manager ($pm)..."
 
-case "$pm" in
-  apt)
-    pm_install "$pm" docker-compose-plugin && start_docker_service || true
-    ;;
-  dnf|yum)
-    pm_install "$pm" docker-compose-plugin && start_docker_service || true
-    ;;
-esac
+  case "$pm" in
+    apt)
+      pm_install "$pm" docker-compose-plugin && start_docker_service || true
+      ;;
+    dnf|yum)
+      pm_install "$pm" docker-compose-plugin && start_docker_service || true
+      ;;
+  esac
 
-if docker compose version >/dev/null 2>&1; then
-  log "docker compose now available"
-  return
-fi
+  if docker_cmd compose version >/dev/null 2>&1; then
+    log "docker compose now available"
+    return
+  fi
 
-local version arch url
-version="${DOCKER_COMPOSE_VERSION:-v2.27.0}"
-arch="$(uname -m)"
-case "$arch" in
-  x86_64|amd64) arch="x86_64" ;;
-  aarch64|arm64) arch="aarch64" ;;
-  *) die "Unsupported architecture for docker compose plugin install: $(uname -m)" ;;
-esac
+  local version arch url
+  version="${DOCKER_COMPOSE_VERSION:-v2.27.0}"
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="x86_64" ;;
+    aarch64|arm64) arch="aarch64" ;;
+    *) die "Unsupported architecture for docker compose plugin install: $(uname -m)" ;;
+  esac
 
-url="https://github.com/docker/compose/releases/download/${version}/docker-compose-linux-${arch}"
-log "Package install failed; installing docker compose plugin from ${url}"
+  url="https://github.com/docker/compose/releases/download/${version}/docker-compose-linux-${arch}"
+  log "Package install failed; installing docker compose plugin from ${url}"
 
-${SUDO} mkdir -p /usr/local/lib/docker/cli-plugins
-${SUDO} curl -fsSL "$url" -o /usr/local/lib/docker/cli-plugins/docker-compose
-${SUDO} chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+  ${SUDO} mkdir -p /usr/local/lib/docker/cli-plugins
+  ${SUDO} curl -fsSL "$url" -o /usr/local/lib/docker/cli-plugins/docker-compose
+  ${SUDO} chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-docker compose version >/dev/null 2>&1 || die "docker compose still not working after install"
-log "docker compose installed: $(docker compose version)"
+  docker_cmd compose version >/dev/null 2>&1 || die "docker compose still not working after install"
+  log "docker compose installed: $(docker_cmd compose version)"
 }
 
 main() {
@@ -200,13 +241,14 @@ main() {
   ensure_docker_running
   ensure_docker_compose
 
-if [[ "$RUN_COMPOSE_UP" -eq 1 ]]; then
+  if [[ "$RUN_COMPOSE_UP" -eq 1 ]]; then
     if [[ ! -f docker-compose.yml ]]; then
       die "docker-compose.yml not found in repo root: $ROOT_DIR"
     fi
-    docker info >/dev/null 2>&1 || die "docker daemon not reachable (try rerun as root or ensure docker service is running)"
+    select_docker_invocation
+    docker_cmd info >/dev/null 2>&1 || die "docker daemon not reachable (try: sudo systemctl start docker)"
     log "Running: docker compose up -d"
-    docker compose up -d
+    docker_cmd compose up -d
     log "Done."
   fi
 
@@ -214,5 +256,3 @@ if [[ "$RUN_COMPOSE_UP" -eq 1 ]]; then
 }
 
 main
-
-
