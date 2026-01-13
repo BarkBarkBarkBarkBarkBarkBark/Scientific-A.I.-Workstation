@@ -619,6 +619,8 @@ class PluginExecuteResponse(BaseModel):
     plugin_id: str
     outputs: dict[str, Any]
     logs: list[dict[str, Any]]
+    raw_stdout: str = ""
+    raw_stderr: str = ""
 
 
 class PluginForkRequest(BaseModel):
@@ -921,6 +923,8 @@ def plugins_execute(req: PluginExecuteRequest) -> PluginExecuteResponse:
             plugin_id=pid,
             outputs=r.get("outputs") or {},
             logs=r.get("logs") or [],
+            raw_stdout=str(r.get("raw_stdout") or ""),
+            raw_stderr=str(r.get("raw_stderr") or ""),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"plugin_execute_failed: {e}")
@@ -1029,4 +1033,3 @@ class ServiceStopResponse(BaseModel):
 def api_stop_service(service_id: str) -> ServiceStopResponse:
     stopped, prior = stop_service(settings, service_id)
     return ServiceStopResponse(ok=True, stopped=bool(stopped), prior_status=str(prior))
-
