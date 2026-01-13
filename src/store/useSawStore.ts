@@ -1234,7 +1234,3 @@ try {
 } catch {
   // ignore
 }
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/codex/locate-full-screen-view-module-code-zz77l8
