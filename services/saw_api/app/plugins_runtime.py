@@ -173,16 +173,18 @@ def execute_plugin(
 
     # plugin_runner prints JSON result on stdout even on failure.
     out: dict[str, Any] = {}
+    parsed_ok = False
     if stdout:
         try:
             parsed = json.loads(stdout)
             if isinstance(parsed, dict):
                 out = parsed
+                parsed_ok = True
         except Exception:
             out = {}
 
     # If the runner failed and did not provide a structured payload, raise with best details we have.
-    if p.returncode != 0 and not out:
+    if p.returncode != 0 and not parsed_ok:
         # stderr is often dominated by progress bars; show a tail snippet and point to log files.
         tail = (stderr or stdout)[-4000:]
         raise RuntimeError(
@@ -190,6 +192,7 @@ def execute_plugin(
             f"logs: {os.path.join(temp_run_dir, 'logs')}"
         )
 
+    out["raw_stdout"] = stdout
+    out["raw_stderr"] = stderr
+
     return out
-
-

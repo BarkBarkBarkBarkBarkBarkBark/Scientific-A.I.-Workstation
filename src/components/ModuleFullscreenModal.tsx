@@ -42,6 +42,8 @@ export function ModuleFullscreenModal() {
   const isLockedStock = Boolean(isWorkspacePlugin && plugin.locked && plugin.origin === 'stock')
   const lastRun = node.data.runtime?.exec?.last ?? null
   const running = node.data.status === 'running'
+  const rawStdout = lastRun?.rawStdout ?? ''
+  const rawStderr = lastRun?.rawStderr ?? ''
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/70 p-4">
@@ -119,6 +121,27 @@ export function ModuleFullscreenModal() {
                           <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
                             {JSON.stringify(lastRun.outputs ?? {}, null, 2)}
                           </pre>
+                          {(rawStdout || rawStderr) ? (
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-semibold text-zinc-400">Raw Python output</div>
+                              {rawStdout ? (
+                                <div>
+                                  <div className="text-[11px] text-zinc-500">stdout</div>
+                                  <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
+                                    {rawStdout}
+                                  </pre>
+                                </div>
+                              ) : null}
+                              {rawStderr ? (
+                                <div>
+                                  <div className="text-[11px] text-zinc-500">stderr</div>
+                                  <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap font-mono text-[11px] text-red-200">
+                                    {rawStderr}
+                                  </pre>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                         <div className="mt-2 text-[11px] text-zinc-500">No runs yet.</div>
@@ -255,5 +278,4 @@ export function ModuleFullscreenModal() {
     </div>
   )
 }
-
 

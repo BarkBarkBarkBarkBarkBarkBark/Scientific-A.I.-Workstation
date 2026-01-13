@@ -876,7 +876,14 @@ const _useSawStore = create<SawState>((set, get) => ({
         }),
       })
       if (!r.ok) throw new Error(await r.text())
-      const j = (await r.json()) as { ok: boolean; outputs: any; logs?: any[]; error?: any }
+      const j = (await r.json()) as {
+        ok: boolean
+        outputs: any
+        logs?: any[]
+        raw_stdout?: string
+        raw_stderr?: string
+        error?: any
+      }
       const ok = Boolean(j?.ok)
       const logs = Array.isArray(j?.logs) ? j.logs : []
       const ranAt = Date.now()
@@ -891,7 +898,17 @@ const _useSawStore = create<SawState>((set, get) => ({
               status: ok ? 'idle' : 'error',
               runtime: {
                 ...(n.data.runtime ?? {}),
-                exec: { last: { ok, outputs: j?.outputs ?? {}, logs, error: j?.error ?? null, ranAt } },
+                exec: {
+                  last: {
+                    ok,
+                    outputs: j?.outputs ?? {},
+                    logs,
+                    rawStdout: j?.raw_stdout ?? '',
+                    rawStderr: j?.raw_stderr ?? '',
+                    error: j?.error ?? null,
+                    ranAt,
+                  },
+                },
               },
             },
           }
@@ -1202,5 +1219,4 @@ try {
 } catch {
   // ignore
 }
-
 
