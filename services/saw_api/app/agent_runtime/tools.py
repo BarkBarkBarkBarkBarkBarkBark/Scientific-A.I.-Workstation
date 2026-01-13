@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
+import yaml
+from pydantic import ValidationError
+
 from .patch_engine_client import pe_get, pe_post
+
+from ..plugins_runtime import PluginManifest
 
 TODO_PATH = "saw-workspace/todo.md"
 AGENT_WORKSPACE_PATH = "saw-workspace/agent/agent_workspace.md"
@@ -58,7 +64,64 @@ def tool_write_agent_workspace(content: str) -> dict[str, Any]:
 
 
 READ_TOOLS = {"dev_tree", "dev_file", "git_status", "get_todo", "get_agent_workspace"}
-WRITE_TOOLS = {"apply_patch", "git_commit", "set_caps", "safe_write", "write_todo", "write_agent_workspace"}
+WRITE_TOOLS = {
+    "apply_patch",
+    "git_commit",
+    "set_caps",
+    "safe_write",
+    "write_todo",
+    "write_agent_workspace",
+    "create_plugin",
+}
+
+
+def tool_validate_plugin_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Validate a SAW plugin manifest dict against the backend schema.
+
+    This is read-only and intended to be called before create_plugin().
+    """
+
+    try:
+        PluginManifest.model_validate(manifest or {})
+        return {"ok": True, "errors": []}
+    except ValidationError as e:
+        errs = []
+        for err in (e.errors() or []):
+            errs.append(
+                {
+                    "loc": [str(x) for x in (err.get("loc") or [])],
+                    "msg": str(err.get("msg") or ""),
+                    "type": str(err.get("type") or ""),
+                }
+            )
+        return {"ok": False, "errors": errs}
+
+
+def tool_create_plugin(*, manifest: dict[str, Any], wrapper_code: str, readme: str) -> dict[str, Any]:
+    """Create a new workspace plugin under saw-workspace/plugins/<id>/.
+
+    This tool validates the manifest before writing.
+    """
+
+    m = PluginManifest.model_validate(manifest or {})
+    plugin_id = str(m.id)
+    plugin_dir = os.path.join("saw-workspace", "plugins", plugin_id)
+
+    plugin_yaml = yaml.safe_dump(manifest or {}, sort_keys=False, allow_unicode=True)
+    out1 = tool_safe_write(os.path.join(plugin_dir, "plugin.yaml"), plugin_yaml)
+    out2 = tool_safe_write(os.path.join(plugin_dir, "wrapper.py"), str(wrapper_code or ""))
+    out3 = tool_safe_write(os.path.join(plugin_dir, "README.md"), str(readme or ""))
+
+    return {
+        "ok": True,
+        "plugin_id": plugin_id,
+        "paths": {
+            "manifest": os.path.join(plugin_dir, "plugin.yaml"),
+            "wrapper": os.path.join(plugin_dir, "wrapper.py"),
+            "readme": os.path.join(plugin_dir, "README.md"),
+        },
+        "results": {"plugin.yaml": out1, "wrapper.py": out2, "README.md": out3},
+    }
 
 
 TOOLS: list[dict[str, Any]] = [
@@ -195,6 +258,90 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+
+    #
+    # SAW plugin tools
+    #
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_plugin_manifest",
+            "description": "Validate a SAW plugin manifest dict against the backend schema (read-only). Call this before create_plugin.",
+            "parameters": {
+                "type": "object",
+                "properties": {"manifest": {"type": "object"}},
+                "required": ["manifest"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_plugin",
+            "description": "Create a new SAW workspace plugin under saw-workspace/plugins/<id>/ by writing plugin.yaml, wrapper.py, and README.md (requires approval).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "manifest": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "name": {"type": "string"},
+                            "version": {"type": "string"},
+                            "description": {"type": "string"},
+                            "category_path": {"type": "string"},
+                            "entrypoint": {"type": "object"},
+                            "environment": {"type": "object"},
+                            "inputs": {"type": "object"},
+                            "params": {"type": "object"},
+                            "outputs": {"type": "object"},
+                            "execution": {"type": "object"},
+                            "side_effects": {
+                                "type": "object",
+                                "properties": {
+                                    "network": {"type": "string", "enum": ["none", "allowed"]},
+                                    "disk": {"type": "string", "enum": ["read_only", "read_write"]},
+                                    "subprocess": {"type": "string", "enum": ["forbidden", "allowed"]},
+                                },
+                                "required": ["network", "disk", "subprocess"],
+                                "additionalProperties": True,
+                            },
+                            "resources": {
+                                "type": "object",
+                                "properties": {
+                                    "gpu": {"type": "string", "enum": ["forbidden", "optional", "required"]},
+                                    "threads": {"type": "integer"},
+                                },
+                                "required": ["gpu", "threads"],
+                                "additionalProperties": True,
+                            },
+                        },
+                        "required": [
+                            "id",
+                            "name",
+                            "version",
+                            "description",
+                            "category_path",
+                            "entrypoint",
+                            "environment",
+                            "inputs",
+                            "params",
+                            "outputs",
+                            "execution",
+                            "side_effects",
+                            "resources",
+                        ],
+                        "additionalProperties": True,
+                    },
+                    "wrapper_code": {"type": "string"},
+                    "readme": {"type": "string"},
+                },
+                "required": ["manifest", "wrapper_code", "readme"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -227,6 +374,16 @@ def run_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return tool_apply_patch(patch=str(args.get("patch") or ""))
     if name == "git_commit":
         return tool_git_commit(message=str(args.get("message") or ""))
+    if name == "validate_plugin_manifest":
+        m = args.get("manifest")
+        return tool_validate_plugin_manifest(manifest=m if isinstance(m, dict) else {})
+    if name == "create_plugin":
+        m = args.get("manifest")
+        return tool_create_plugin(
+            manifest=m if isinstance(m, dict) else {},
+            wrapper_code=str(args.get("wrapper_code") or ""),
+            readme=str(args.get("readme") or ""),
+        )
     raise RuntimeError("unknown_tool")
 
 

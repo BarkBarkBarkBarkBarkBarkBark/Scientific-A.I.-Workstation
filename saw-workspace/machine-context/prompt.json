@@ -74,6 +74,18 @@
       "include": ["file paths changed", "how to use in UI"],
       "avoid": ["long essays", "leaking secrets", "backend requirements"]
     }
+  },
+  "agent_tooling_notes": {
+    "goal": "Increase tool consideration without requiring perfect user phrasing.",
+    "routing": {
+      "if_user_requests_plugin_creation": [
+        "Read saw-workspace/plugins/saw.template.plugin/AGENT_CONTEXT.md",
+        "Use src/agent/actions/createPlugin.ts as the canonical manifest schema reference",
+        "Call validate_plugin_manifest(manifest=...) before writing",
+        "Call create_plugin(manifest=..., wrapper_code=..., readme=...) to write files into saw-workspace/plugins/<id>/",
+        "Never write plugin files into repo root"
+      ]
+    }
   }
 }
 

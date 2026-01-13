@@ -16,6 +16,68 @@ from .tools import READ_TOOLS, TOOLS, WRITE_TOOLS, run_tool
 AgentStatus = Literal["ok", "needs_approval", "error"]
 
 
+def _looks_like_plugin_creation_request(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+
+    # Strong phrases
+    strong_triggers = (
+        "create a plugin",
+        "make a plugin",
+        "build a plugin",
+        "generate a plugin",
+        "new plugin",
+        "plugin.yaml",
+        "wrapper.py",
+        "saw-workspace/plugins",
+    )
+    if any(x in t for x in strong_triggers):
+        return True
+
+    # Keyword routing: if the user says "plugin" plus a creation verb, treat it as plugin creation.
+    has_plugin = "plugin" in t or "plugins" in t
+    if not has_plugin:
+        return False
+    creation_verbs = ("build", "make", "create", "generate", "add", "scaffold")
+    return any(v in t for v in creation_verbs)
+
+
+def _mentions_plugin_ambiguous(text: str) -> bool:
+    """Return True if the user mentions 'plugin' but intent is ambiguous.
+
+    We only ask a clarifying question when they didn't clearly request creation AND the text doesn't
+    look like a run/debug/list request.
+    """
+
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if "plugin" not in t and "plugins" not in t:
+        return False
+    if _looks_like_plugin_creation_request(t):
+        return False
+    # If they clearly want to run/execute/list/fix an existing plugin, don't interrupt.
+    non_creation_intents = (
+        "run",
+        "execute",
+        "invoke",
+        "index",
+        "list",
+        "discover",
+        "load",
+        "refresh",
+        "debug",
+        "fix",
+        "broken",
+        "error",
+        "failed",
+        "500",
+        "/plugins",
+    )
+    return not any(k in t for k in non_creation_intents)
+
+
 def agent_model() -> str:
     # Prefer a dedicated agent model override; fall back to OPENAI_MODEL; then a sane default.
     return (os.environ.get("SAW_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini").strip()
@@ -55,6 +117,29 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
     if not user_text:
         return {"status": "error", "error": "missing_message", "conversation_id": st.id}
 
+    # If the user says "plugin" but doesn't specify whether they want a new plugin vs. something else,
+    # ask a quick clarifying question (reduces adoption friction).
+    if _mentions_plugin_ambiguous(user_text):
+        q = (
+            "When you say ‘plugin’, do you want me to build a NEW SAW plugin? "
+            "If yes, tell me what it should do (1–2 sentences) and optionally an id/name. "
+            "If no, tell me what plugin task you meant (run/list/fix/etc.)."
+        )
+        st.messages.append({"role": "user", "content": user_text})
+        st.messages.append({"role": "assistant", "content": q})
+        st.updated_at_ms = now_ms()
+        append_agent_event(
+            settings,
+            {
+                "type": "agent.chat.response",
+                "conversation_id": st.id,
+                "model": "router",
+                "message_len": len(q),
+                "message": maybe_log_text(q),
+            },
+        )
+        return {"status": "ok", "conversation_id": st.id, "message": q, "model": model}
+
     st.messages.append({"role": "user", "content": user_text})
 
     client = OpenAI(api_key=settings.openai_api_key)
@@ -62,6 +147,7 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
 
     # Tool loop: execute read tools automatically; stop + request approval on write tools.
     max_steps = 10
+    nudged_for_plugin_tools = False
     for _ in range(max_steps):
         resp = client.chat.completions.create(
             model=model,
@@ -149,6 +235,24 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
 
         # Normal assistant response
         content = str(msg.content or "")
+
+        # Lightweight routing: if user clearly asked to create a plugin but the model didn't use tools,
+        # reprompt once to encourage validate_plugin_manifest -> create_plugin.
+        if (not nudged_for_plugin_tools) and _looks_like_plugin_creation_request(user_text):
+            nudged_for_plugin_tools = True
+            st.messages.append({"role": "assistant", "content": content})
+            st.messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Reminder: This request is SAW plugin creation. "
+                        "Use tools (validate_plugin_manifest then create_plugin) to create the plugin under "
+                        "saw-workspace/plugins/<id>/. Do not write files in the repo root. Proceed with tool calls now."
+                    ),
+                }
+            )
+            continue
+
         st.messages.append({"role": "assistant", "content": content})
         st.updated_at_ms = now_ms()
         append_agent_event(
