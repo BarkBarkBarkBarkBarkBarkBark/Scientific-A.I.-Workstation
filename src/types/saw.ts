@@ -78,6 +78,8 @@ export type ExecRuntime = {
     ok: boolean
     outputs: any
     logs: any[]
+    rawStdout?: string
+    rawStderr?: string
     error?: string | null
     ranAt: number
   } | null
@@ -104,5 +106,4 @@ export type PluginNodeData = {
 }
 
 export type PluginNode = Node<PluginNodeData, 'pluginNode'>
-
 
