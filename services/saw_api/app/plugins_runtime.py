@@ -137,6 +137,8 @@ def execute_plugin(
     
     # Set up environment with SAW_RUN_DIR for plugins that need to write files
     env = dict(os.environ)
+    if settings.openai_api_key and not env.get("OPENAI_API_KEY"):
+        env["OPENAI_API_KEY"] = settings.openai_api_key
     # Create a temporary run directory for synchronous execution
     import tempfile
     import time

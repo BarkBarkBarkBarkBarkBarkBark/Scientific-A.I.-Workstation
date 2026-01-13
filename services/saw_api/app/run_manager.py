@@ -278,6 +278,8 @@ def spawn_run(
 
             runner = os.path.abspath(os.path.join(os.path.dirname(__file__), "plugin_runner.py"))
             env = dict(os.environ)
+            if settings.openai_api_key and not env.get("OPENAI_API_KEY"):
+                env["OPENAI_API_KEY"] = settings.openai_api_key
             env["SAW_RUN_DIR"] = rd
             env["SAW_PLUGIN_ID"] = plugin_id
             env["SAW_ENV_KEY"] = er.env_key

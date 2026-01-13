@@ -6,8 +6,8 @@ Creates a new plugin folder under saw-workspace/plugins from:
   - or an inline code snippet
 
 Notes:
-  - Uses OpenAI API for wrapper generation when OPENAI_API_KEY is present.
-  - Falls back to a deterministic template wrapper if OpenAI is unavailable.
+  - Requires OpenAI API (OPENAI_API_KEY must be set).
+  - No fallback generation; errors are raised if OpenAI fails.
 """
 
 from __future__ import annotations
@@ -19,7 +19,31 @@ import subprocess
 import textwrap
 import urllib.request
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+
+#region agent log
+import json as _agent_json
+from datetime import datetime as _agent_datetime
+
+_AGENT_LOG_PATH = "/Users/marco/Cursor_Folder/Cursor_Codespace/Scientific A.I. Workstation/.cursor/debug.log"
+_AGENT_SESSION = "debug-session"
+
+def _agent_log(hypothesis: str, location: str, message: str, data: dict | None = None) -> None:
+    try:
+        payload = {
+            "sessionId": _AGENT_SESSION,
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(_agent_datetime.now().timestamp() * 1000),
+        }
+        with open(_AGENT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(_agent_json.dumps(payload) + "\n")
+    except Exception:
+        pass
+#endregion
 
 
 def _workspace_root() -> str:
@@ -43,10 +67,6 @@ def _safe_join_under(root: str, rel: str) -> str:
     if not abs_path.startswith(root_abs):
         raise ValueError("path must be inside saw-workspace/")
     return abs_path
-
-
-def _truthy(s: str) -> bool:
-    return str(s or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 
 def _slugify(value: str) -> str:
@@ -123,10 +143,11 @@ def _extract_code_block(text: str) -> str | None:
     return None
 
 
-def _call_openai(model: str, system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
+def _call_openai(model: str, system_prompt: str, user_prompt: str) -> str:
     api_key = os.environ.get("OPENAI_API_KEY")
+    _agent_log("H_env", "_call_openai", "env_check", {"has_api_key": bool(api_key)})
     if not api_key:
-        return None, "OPENAI_API_KEY is not set"
+        raise RuntimeError("OPENAI_API_KEY is not set")
     body = {
         "model": model,
         "messages": [
@@ -147,24 +168,24 @@ def _call_openai(model: str, system_prompt: str, user_prompt: str) -> tuple[str 
             raw = resp.read().decode("utf-8", errors="replace")
         payload = json.loads(raw or "{}")
         content = payload["choices"][0]["message"]["content"]
-        return content, None
+        if not content:
+            raise RuntimeError("OpenAI returned empty content")
+        return content
     except Exception as exc:
-        return None, str(exc)
+        raise RuntimeError(f"OpenAI request failed: {exc}")
 
 
 def _render_manifest(
     plugin_id: str,
     plugin_name: str,
     plugin_description: str,
-    plugin_category_path: str,
-    plugin_version: str,
 ) -> str:
     manifest = {
         "id": plugin_id,
         "name": plugin_name,
-        "version": plugin_version,
+        "version": "0.1.0",
         "description": plugin_description,
-        "category_path": plugin_category_path,
+        "category_path": "generated",
         "entrypoint": {"file": "wrapper.py", "callable": "main"},
         "environment": {"python": ">=3.11,<3.13"},
         "inputs": {"input": {"type": "text"}},
@@ -210,34 +231,7 @@ def _render_manifest(
     )
 
 
-def _default_wrapper(plugin_id: str, notes: Iterable[str]) -> str:
-    notes_block = "\n".join(f"# - {note}" for note in notes if note)
-    return textwrap.dedent(
-        f"""
-        \"\"\"SAW Plugin: {plugin_id}
-
-        TODO:
-        {notes_block or "# - Fill in the implementation for your lab code."}
-        \"\"\"
-
-        from __future__ import annotations
-
-        def main(inputs: dict, params: dict, context) -> dict:
-            text_input = (inputs or {{}}).get("input", {{}}).get("data")
-            options = (params or {{}}).get("options") or {{}}
-            context.log("info", "generated_plugin:start", options=options)
-            result = {{
-                "echo": text_input,
-                "options": options,
-                "message": "Generated wrapper stub. Implement logic in wrapper.py.",
-            }}
-            context.log("info", "generated_plugin:done")
-            return {{"result": {{"data": result, "metadata": {{"plugin": "{plugin_id}"}}}}}}
-        """
-    ).lstrip()
-
-
-def _build_openai_prompt(code_text: str) -> tuple[str, str]:
+def _build_openai_prompt(code_text: str, user_request: str) -> tuple[str, str]:
     system_prompt = (
         "You are generating a SAW plugin wrapper.py. "
         "The wrapper must export main(inputs, params, context) -> dict and obey the SAW "
@@ -250,6 +244,9 @@ def _build_openai_prompt(code_text: str) -> tuple[str, str]:
         If you cannot infer precise inputs/outputs, create a safe, minimal wrapper that accepts
         a text input and returns a structured result.
 
+        User request:
+        {user_request or "N/A"}
+
         Code excerpt (may be partial):
         {code_text}
         """
@@ -261,7 +258,6 @@ def _build_readme_prompt(
     plugin_id: str,
     plugin_name: str,
     plugin_description: str,
-    plugin_author: str,
     repo_url: str,
     user_request: str,
     code_text: str,
@@ -277,7 +273,7 @@ def _build_readme_prompt(
         Plugin ID: {plugin_id}
         Name: {plugin_name}
         Description: {plugin_description}
-        Author/Lab: {plugin_author or "Unknown"}
+        Author/Lab: N/A
         Repo URL: {repo_url or "N/A"}
         User request: {user_request or "N/A"}
 
@@ -296,46 +292,6 @@ def _build_readme_prompt(
     return system_prompt, user_prompt
 
 
-def _default_readme(
-    plugin_id: str,
-    plugin_name: str,
-    plugin_description: str,
-    plugin_author: str,
-    repo_url: str,
-    user_request: str,
-) -> str:
-    return textwrap.dedent(
-        f"""
-        # {plugin_name}
-
-        **Plugin ID:** `{plugin_id}`
-        **Author/Lab:** {plugin_author or "Unknown"}
-        **Source Repo:** {repo_url or "N/A"}
-
-        ## Overview
-        {plugin_description or "Generated plugin scaffold."}
-
-        ## Inputs
-        - `input` (text): Primary input payload.
-
-        ## Parameters
-        - `options` (object): Free-form options for the wrapper.
-
-        ## Outputs
-        - `result` (object): Structured response.
-
-        ## Usage
-        1. Configure inputs and parameters in the SAW UI.
-        2. Run the plugin to execute the wrapper.
-        3. Inspect `result` for outputs and logs.
-
-        ## Notes/Assumptions
-        - User request: {user_request or "N/A"}
-        - This README is a template. Update sections with lab-specific details.
-        """
-    ).lstrip()
-
-
 def _ensure_dir(path: str) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
 
@@ -351,48 +307,41 @@ def main(inputs: dict, params: dict, context) -> dict:
     code_path = str((inputs or {}).get("code_path", {}).get("data") or "").strip()
     code_snippet = str((inputs or {}).get("code_snippet", {}).get("data") or "")
 
-    plugin_id = str((params or {}).get("plugin_id") or "").strip()
     plugin_name = str((params or {}).get("plugin_name") or "").strip()
     plugin_description = str((params or {}).get("plugin_description") or "").strip()
-    plugin_author = str((params or {}).get("plugin_author") or "").strip()
-    plugin_category_path = str((params or {}).get("plugin_category_path") or "generated").strip()
-    plugin_version = str((params or {}).get("plugin_version") or "0.1.0").strip()
-    plugin_dir = str((params or {}).get("plugin_dir") or "").strip()
-    repo_ref = str((params or {}).get("repo_ref") or "").strip()
-    overwrite = _truthy(str((params or {}).get("overwrite") or "false"))
-    openai_model = str((params or {}).get("openai_model") or "gpt-4o-mini").strip()
-    openai_system_prompt = str((params or {}).get("openai_system_prompt") or "").strip()
-    readme_enabled = _truthy(str((params or {}).get("readme_enabled") or "true"))
-    max_code_bytes = int(float((params or {}).get("max_code_bytes") or 60000))
+    openai_model = "gpt-4o-mini"
+    max_code_bytes = 60000
 
     warnings: list[str] = []
     source_repo_dir = ""
 
+    _agent_log("H_flow", "main:entry", "start", {
+        "has_api_key": bool(os.environ.get("OPENAI_API_KEY")),
+        "has_repo_url": bool(repo_url),
+        "has_code_path": bool(code_path),
+        "has_code_snippet": bool(code_snippet),
+        "user_request_len": len(user_request),
+    })
+
     if repo_url:
-        source_repo_dir, repo_warnings = _clone_or_update_repo(repo_url, repo_ref, sources_root)
+        source_repo_dir, repo_warnings = _clone_or_update_repo(repo_url, "", sources_root)
         warnings.extend(repo_warnings)
 
-    if not plugin_id:
-        if repo_url:
-            plugin_id = f"saw.generated.{_slugify(Path(repo_url).stem)}"
-        else:
-            plugin_id = "saw.generated.plugin"
-
     if not plugin_name:
-        plugin_name = plugin_id.split(".")[-1].replace("-", " ").title()
+        if repo_url:
+            plugin_name = Path(repo_url).stem.replace("-", " ").title()
+        else:
+            plugin_name = "Generated Plugin"
 
     if not plugin_description:
         plugin_description = f"Generated plugin for {plugin_name}."
 
-    if not plugin_dir:
-        plugin_dir = _slugify(plugin_id)
+    plugin_id = f"saw.generated.{_slugify(plugin_name)}"
+    plugin_dir = _slugify(plugin_id)
 
     plugin_path = _safe_join_under(plugins_root, plugin_dir)
     if os.path.exists(plugin_path):
-        if overwrite:
-            warnings.append(f"overwriting existing plugin folder: {plugin_path}")
-        else:
-            raise RuntimeError(f"plugin folder already exists: {plugin_path}")
+        raise RuntimeError(f"plugin folder already exists: {plugin_path}")
 
     _ensure_dir(plugin_path)
 
@@ -412,66 +361,42 @@ def main(inputs: dict, params: dict, context) -> dict:
         plugin_id=plugin_id,
         plugin_name=plugin_name,
         plugin_description=plugin_description,
-        plugin_category_path=plugin_category_path,
-        plugin_version=plugin_version,
     )
 
-    wrapper_text = None
-    openai_error = None
-    if code_text:
-        system_prompt, user_prompt = _build_openai_prompt(code_text)
-        if openai_system_prompt:
-            system_prompt = openai_system_prompt
-        content, openai_error = _call_openai(openai_model, system_prompt, user_prompt)
-        wrapper_text = _extract_code_block(content or "")
-        if not wrapper_text and content:
-            wrapper_text = content
+    prompt_context = code_text
+    if not prompt_context and user_request:
+        prompt_context = f"User request:\n{user_request}"
+    if not prompt_context:
+        raise RuntimeError("Missing context: provide user_request, repo_url, or code_path/code_snippet.")
+    _agent_log("H_flow", "main:prompt", "context_ready", {
+        "prompt_context_len": len(prompt_context or ""),
+        "plugin_path": plugin_path,
+    })
 
-    if not wrapper_text:
-        if openai_error:
-            warnings.append(f"openai_error: {openai_error}")
-        wrapper_text = _default_wrapper(
-            plugin_id,
-            notes=[
-                "Generated using fallback template wrapper.",
-                "Provide OPENAI_API_KEY to auto-generate wrapper.py from code context.",
-            ],
-        )
+    system_prompt, user_prompt = _build_openai_prompt(prompt_context, user_request)
+    content = _call_openai(openai_model, system_prompt, user_prompt)
+    wrapper_text = _extract_code_block(content) or content
+    _agent_log("H_api", "main:after_call", "openai_done", {
+        "content_len": len(content or ""),
+        "wrapper_len": len(wrapper_text or ""),
+    })
 
     (Path(plugin_path) / "plugin.yaml").write_text(manifest_text, encoding="utf-8")
     (Path(plugin_path) / "wrapper.py").write_text(wrapper_text, encoding="utf-8")
 
-    readme_text = ""
-    if readme_enabled:
-        readme_prompt_sys, readme_prompt_user = _build_readme_prompt(
-            plugin_id=plugin_id,
-            plugin_name=plugin_name,
-            plugin_description=plugin_description,
-            plugin_author=plugin_author,
-            repo_url=repo_url,
-            user_request=user_request,
-            code_text=code_text,
-        )
-        if openai_system_prompt:
-            readme_prompt_sys = openai_system_prompt
-        readme_content, readme_error = _call_openai(
-            openai_model,
-            readme_prompt_sys,
-            readme_prompt_user,
-        )
-        readme_text = readme_content or ""
-        if not readme_text:
-            if readme_error:
-                warnings.append(f"readme_openai_error: {readme_error}")
-            readme_text = _default_readme(
-                plugin_id=plugin_id,
-                plugin_name=plugin_name,
-                plugin_description=plugin_description,
-                plugin_author=plugin_author,
-                repo_url=repo_url,
-                user_request=user_request,
-            )
-        (Path(plugin_path) / "README.md").write_text(readme_text, encoding="utf-8")
+    readme_prompt_sys, readme_prompt_user = _build_readme_prompt(
+        plugin_id=plugin_id,
+        plugin_name=plugin_name,
+        plugin_description=plugin_description,
+        repo_url=repo_url,
+        user_request=user_request,
+        code_text=prompt_context or "",
+    )
+    readme_content = _call_openai(openai_model, readme_prompt_sys, readme_prompt_user)
+    (Path(plugin_path) / "README.md").write_text(readme_content, encoding="utf-8")
+    _agent_log("H_api", "main:readme", "readme_done", {
+        "readme_len": len(readme_content or ""),
+    })
 
     context.log(
         "info",
@@ -488,9 +413,13 @@ def main(inputs: dict, params: dict, context) -> dict:
         "plugin_path": plugin_path,
         "manifest_path": os.path.join(plugin_path, "plugin.yaml"),
         "wrapper_path": os.path.join(plugin_path, "wrapper.py"),
-        "readme_path": os.path.join(plugin_path, "README.md") if readme_enabled else "",
+        "readme_path": os.path.join(plugin_path, "README.md"),
         "source_repo_dir": source_repo_dir,
-        "openai_used": bool(code_text and not openai_error),
+        "openai_used": True,
         "warnings": warnings,
     }
+    _agent_log("H_result", "main:exit", "done", {
+        "warnings": warnings,
+        "plugin_path": plugin_path,
+    })
     return {"result": {"data": result, "metadata": {"plugin": "saw.plugin.generator"}}}

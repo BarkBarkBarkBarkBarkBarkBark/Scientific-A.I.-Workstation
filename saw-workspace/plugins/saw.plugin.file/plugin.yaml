@@ -22,57 +22,14 @@ inputs:
     type: "text"
     description: "Inline code snippet to wrap (optional)."
 params:
-  plugin_id:
-    type: "string"
-    default: ""
-    ui: { label: "Plugin ID (e.g. lab.example.tool)" }
   plugin_name:
     type: "string"
     default: ""
-    ui: { label: "Plugin display name" }
+    ui: { label: "Plugin name" }
   plugin_description:
     type: "string"
     default: ""
     ui: { label: "Plugin description" }
-  plugin_author:
-    type: "string"
-    default: ""
-    ui: { label: "Author or lab name (optional)" }
-  plugin_category_path:
-    type: "string"
-    default: "generated"
-    ui: { label: "Category path" }
-  plugin_version:
-    type: "string"
-    default: "0.1.0"
-  plugin_dir:
-    type: "string"
-    default: ""
-    ui: { label: "Folder name under saw-workspace/plugins" }
-  repo_ref:
-    type: "string"
-    default: ""
-    ui: { label: "Git ref (branch/tag/commit) to checkout (optional)" }
-  overwrite:
-    type: "string"
-    default: "false"
-    ui: { label: "Overwrite existing plugin folder (true/false)" }
-  openai_model:
-    type: "string"
-    default: "gpt-4o-mini"
-    ui: { label: "OpenAI model for wrapper generation" }
-  openai_system_prompt:
-    type: "string"
-    default: ""
-    ui: { label: "Override system prompt (optional)" }
-  readme_enabled:
-    type: "string"
-    default: "true"
-    ui: { label: "Generate README.md (true/false)" }
-  max_code_bytes:
-    type: "number"
-    default: 60000
-    ui: { label: "Max bytes to read from code_path/code_snippet" }
 outputs:
   result:
     type: "object"

@@ -619,6 +619,7 @@ class PluginExecuteResponse(BaseModel):
     plugin_id: str
     outputs: dict[str, Any]
     logs: list[dict[str, Any]]
+    
 
 
 class PluginForkRequest(BaseModel):
