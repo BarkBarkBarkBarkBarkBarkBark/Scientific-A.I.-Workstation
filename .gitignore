@@ -13,7 +13,7 @@ pnpm-debug.log*
 .venv
 .venv.*
 todo.md
-
+*.pyc
 # Python runtime artifacts
 __pycache__/
 *.py[cod]
