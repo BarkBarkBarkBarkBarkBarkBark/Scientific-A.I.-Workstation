@@ -7,6 +7,7 @@ import { SourceViewer } from './SourceViewer'
 import { IngestDirectoryModule } from './modules/IngestDirectoryModule'
 import { BouncingTextModule } from './modules/BouncingTextModule'
 import { ReadOnlyFileViewer } from './ReadOnlyFileViewer'
+import { NodeInputs } from './inspector/NodeInputs'
 import { NodeParameters } from './inspector/NodeParameters'
 
 export function ModuleFullscreenModal() {
@@ -70,6 +71,7 @@ export function ModuleFullscreenModal() {
             <Panel title="Module" className="min-h-0 overflow-hidden">
               <div className="h-full overflow-auto p-3">
                 <div className="space-y-3">
+                  <NodeInputs nodeId={node.id} />
                   <NodeParameters nodeId={node.id} />
 
                   {isWorkspacePlugin ? (
@@ -278,4 +280,3 @@ export function ModuleFullscreenModal() {
     </div>
   )
 }
-

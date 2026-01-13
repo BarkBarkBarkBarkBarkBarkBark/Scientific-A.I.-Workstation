@@ -71,6 +71,7 @@ type SawState = {
   isValidConnection: (c: Connection) => boolean
   tryAddEdge: (c: Connection) => void
   updateNodeParam: (nodeId: string, paramId: string, value: string | number) => void
+  updateNodeInput: (nodeId: string, inputId: string, value: string | number) => void
   openFullscreen: (nodeId: string) => void
   closeFullscreen: () => void
   refreshAiStatus: () => Promise<void>
@@ -136,6 +137,7 @@ function makeNodeData(catalog: PluginDefinition[], pluginId: string): PluginNode
       pluginId,
       title: pluginId,
       status: 'error',
+      inputs: {},
       params: {},
       portTypes: {},
       code: `# Unknown plugin: ${pluginId}`,
@@ -146,6 +148,8 @@ function makeNodeData(catalog: PluginDefinition[], pluginId: string): PluginNode
   }
   const params: Record<string, string | number> = {}
   for (const def of p.parameters) params[def.id] = def.default
+  const inputs: Record<string, string | number> = {}
+  for (const input of p.inputs) inputs[input.id] = ''
 
   const portTypes: Record<string, string> = {}
   for (const input of p.inputs) portTypes[`in:${input.id}`] = input.type
@@ -159,6 +163,7 @@ function makeNodeData(catalog: PluginDefinition[], pluginId: string): PluginNode
     pluginId,
     title: p.name,
     status: 'idle',
+    inputs,
     params,
     portTypes,
     code,
@@ -486,6 +491,13 @@ const _useSawStore = create<SawState>((set, get) => ({
     if (node?.data.pluginId === 'audio_lowpass' && paramId === 'cutoff_hz') {
       void get().recomputeLowpass(nodeId)
     }
+  },
+  updateNodeInput: (nodeId, inputId, value) => {
+    set((s) => ({
+      nodes: s.nodes.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, inputs: { ...n.data.inputs, [inputId]: value } } } : n,
+      ),
+    }))
   },
 
   openFullscreen: (nodeId) => set({ fullscreen: { open: true, nodeId } }),
@@ -859,6 +871,9 @@ const _useSawStore = create<SawState>((set, get) => ({
     const node = get().nodes.find((n) => n.id === nodeId) ?? null
     if (!node) return { ok: false, error: 'missing_node' }
     const pluginId = node.data.pluginId
+    const inputPayload = Object.fromEntries(
+      Object.entries(node.data.inputs ?? {}).map(([key, value]) => [key, { data: value }]),
+    )
 
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, status: 'running' } } : n)),
@@ -871,7 +886,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           plugin_id: pluginId,
-          inputs: {},
+          inputs: inputPayload,
           params: node.data.params ?? {},
         }),
       })
@@ -1219,4 +1234,7 @@ try {
 } catch {
   // ignore
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/codex/locate-full-screen-view-module-code-zz77l8

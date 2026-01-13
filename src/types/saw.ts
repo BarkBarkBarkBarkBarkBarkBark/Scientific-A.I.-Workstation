@@ -89,6 +89,7 @@ export type PluginNodeData = {
   pluginId: string
   title: string
   status: NodeStatus
+  inputs: Record<string, string | number>
   params: Record<string, string | number>
   /**
    * handleId -> type
@@ -106,4 +107,7 @@ export type PluginNodeData = {
 }
 
 export type PluginNode = Node<PluginNodeData, 'pluginNode'>
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/codex/locate-full-screen-view-module-code-zz77l8
