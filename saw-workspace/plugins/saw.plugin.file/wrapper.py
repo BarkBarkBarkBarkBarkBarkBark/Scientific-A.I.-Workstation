@@ -254,6 +254,26 @@ def _build_openai_prompt(code_text: str, user_request: str) -> tuple[str, str]:
     return system_prompt, user_prompt
 
 
+def _build_openai_prompt_from_description(description_text: str) -> tuple[str, str]:
+    system_prompt = (
+        "You are generating a SAW plugin wrapper.py from a plain-English description. "
+        "The wrapper must export main(inputs, params, context) -> dict and obey the SAW "
+        "contract: inputs/outputs are wrapped with {data, metadata}. "
+        "Only output python code, ideally fenced in ```python```."
+    )
+    user_prompt = textwrap.dedent(
+        f"""
+        Generate wrapper.py for a SAW plugin based on the description below.
+        Implement the described behavior directly in wrapper.py. If details are missing,
+        make reasonable assumptions and keep the wrapper safe and minimal.
+
+        Description:
+        {description_text}
+        """
+    ).strip()
+    return system_prompt, user_prompt
+
+
 def _build_readme_prompt(
     plugin_id: str,
     plugin_name: str,
@@ -292,6 +312,56 @@ def _build_readme_prompt(
     return system_prompt, user_prompt
 
 
+def _default_wrapper(plugin_name: str, description: str, user_request: str) -> str:
+    summary = description or user_request or "A generated SAW plugin."
+    safe_name = plugin_name or "Generated Plugin"
+    return textwrap.dedent(
+        f"""
+        \"\"\"{safe_name} - default fallback wrapper.
+
+        Summary: {summary}
+        \"\"\"
+
+        from __future__ import annotations
+
+        from typing import Any
+
+
+        def main(inputs: dict, params: dict, context) -> dict:
+            text = str((inputs or {{}}).get("input", {{}}).get("data") or "")
+            options = (params or {{}}).get("options") or {{}}
+            result: dict[str, Any] = {{
+                "text": text,
+                "options": options,
+                "message": "Default wrapper used. Provide code or description for a richer wrapper.",
+            }}
+            return {{"result": {{"data": result, "metadata": {{"plugin": "saw.plugin.generator"}}}}}}
+        """
+    ).lstrip()
+
+
+def _default_readme(plugin_name: str, plugin_description: str) -> str:
+    return textwrap.dedent(
+        f"""
+        # {plugin_name}
+
+        {plugin_description}
+
+        ## Overview
+        This plugin was generated with a fallback README because OpenAI was unavailable.
+
+        ## Inputs
+        - `input` (text)
+
+        ## Parameters
+        - `options` (object)
+
+        ## Outputs
+        - `result` (object)
+        """
+    ).strip()
+
+
 def _ensure_dir(path: str) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
 
@@ -308,7 +378,7 @@ def main(inputs: dict, params: dict, context) -> dict:
     code_snippet = str((inputs or {}).get("code_snippet", {}).get("data") or "")
 
     plugin_name = str((params or {}).get("plugin_name") or "").strip()
-    plugin_description = str((params or {}).get("plugin_description") or "").strip()
+    plugin_description_input = str((params or {}).get("plugin_description") or "").strip()
     openai_model = "gpt-4o-mini"
     max_code_bytes = 60000
 
@@ -333,6 +403,7 @@ def main(inputs: dict, params: dict, context) -> dict:
         else:
             plugin_name = "Generated Plugin"
 
+    plugin_description = plugin_description_input
     if not plugin_description:
         plugin_description = f"Generated plugin for {plugin_name}."
 
@@ -363,36 +434,60 @@ def main(inputs: dict, params: dict, context) -> dict:
         plugin_description=plugin_description,
     )
 
-    prompt_context = code_text
-    if not prompt_context and user_request:
-        prompt_context = f"User request:\n{user_request}"
+    description_context = ""
+    if plugin_description_input:
+        description_context = plugin_description_input
+    if user_request:
+        description_context = "\n".join(
+            part for part in [description_context, f"User request:\n{user_request}"] if part
+        )
+
+    prompt_context = code_text or description_context
     if not prompt_context:
-        raise RuntimeError("Missing context: provide user_request, repo_url, or code_path/code_snippet.")
+        raise RuntimeError(
+            "Missing context: provide plugin_description/user_request or repo_url/code_path/code_snippet."
+        )
     _agent_log("H_flow", "main:prompt", "context_ready", {
         "prompt_context_len": len(prompt_context or ""),
         "plugin_path": plugin_path,
     })
 
-    system_prompt, user_prompt = _build_openai_prompt(prompt_context, user_request)
-    content = _call_openai(openai_model, system_prompt, user_prompt)
-    wrapper_text = _extract_code_block(content) or content
+    wrapper_text = ""
+    openai_used = False
+    try:
+        if code_text:
+            system_prompt, user_prompt = _build_openai_prompt(code_text, user_request)
+        else:
+            system_prompt, user_prompt = _build_openai_prompt_from_description(description_context)
+        content = _call_openai(openai_model, system_prompt, user_prompt)
+        wrapper_text = (_extract_code_block(content) or content or "").strip()
+        if not wrapper_text:
+            raise RuntimeError("OpenAI returned empty wrapper content")
+        openai_used = True
+    except Exception as exc:
+        warnings.append(f"OpenAI unavailable, using default wrapper: {exc}")
+        wrapper_text = _default_wrapper(plugin_name, plugin_description, user_request)
     _agent_log("H_api", "main:after_call", "openai_done", {
-        "content_len": len(content or ""),
         "wrapper_len": len(wrapper_text or ""),
+        "openai_used": openai_used,
     })
 
     (Path(plugin_path) / "plugin.yaml").write_text(manifest_text, encoding="utf-8")
     (Path(plugin_path) / "wrapper.py").write_text(wrapper_text, encoding="utf-8")
 
-    readme_prompt_sys, readme_prompt_user = _build_readme_prompt(
-        plugin_id=plugin_id,
-        plugin_name=plugin_name,
-        plugin_description=plugin_description,
-        repo_url=repo_url,
-        user_request=user_request,
-        code_text=prompt_context or "",
-    )
-    readme_content = _call_openai(openai_model, readme_prompt_sys, readme_prompt_user)
+    try:
+        readme_prompt_sys, readme_prompt_user = _build_readme_prompt(
+            plugin_id=plugin_id,
+            plugin_name=plugin_name,
+            plugin_description=plugin_description,
+            repo_url=repo_url,
+            user_request=user_request,
+            code_text=prompt_context or "",
+        )
+        readme_content = _call_openai(openai_model, readme_prompt_sys, readme_prompt_user)
+    except Exception as exc:
+        warnings.append(f"OpenAI unavailable, using fallback README: {exc}")
+        readme_content = _default_readme(plugin_name, plugin_description)
     (Path(plugin_path) / "README.md").write_text(readme_content, encoding="utf-8")
     _agent_log("H_api", "main:readme", "readme_done", {
         "readme_len": len(readme_content or ""),
@@ -415,7 +510,7 @@ def main(inputs: dict, params: dict, context) -> dict:
         "wrapper_path": os.path.join(plugin_path, "wrapper.py"),
         "readme_path": os.path.join(plugin_path, "README.md"),
         "source_repo_dir": source_repo_dir,
-        "openai_used": True,
+        "openai_used": openai_used,
         "warnings": warnings,
     }
     _agent_log("H_result", "main:exit", "done", {
