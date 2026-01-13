@@ -63,7 +63,7 @@ def tool_write_agent_workspace(content: str) -> dict[str, Any]:
     return tool_safe_write(AGENT_WORKSPACE_PATH, content)
 
 
-READ_TOOLS = {"dev_tree", "dev_file", "git_status", "get_todo", "get_agent_workspace"}
+READ_TOOLS = {"dev_tree", "dev_file", "git_status", "get_todo", "get_agent_workspace", "validate_plugin_manifest"}
 WRITE_TOOLS = {
     "apply_patch",
     "git_commit",
