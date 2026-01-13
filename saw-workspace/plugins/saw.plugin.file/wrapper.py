@@ -302,7 +302,15 @@ def main(inputs: dict, params: dict, context) -> dict:
     sources_root = _safe_join_under(ws_root, "sources")
     _ensure_dir(sources_root)
 
-    repo_url = str((inputs or {}).get("repo_url", {}).get("data") or "").strip()
+    raw_repo_url = str((inputs or {}).get("repo_url", {}).get("data") or "")
+    repo_url = raw_repo_url.strip()
+    if repo_url in {"", ".", "./"}:
+        repo_url = ""
+    repo_url_is_valid = bool(repo_url) and (
+        repo_url.startswith("http")
+        or repo_url.startswith("https")
+        or repo_url.startswith("git@")
+    )
     user_request = str((inputs or {}).get("user_request", {}).get("data") or "").strip()
     code_path = str((inputs or {}).get("code_path", {}).get("data") or "").strip()
     code_snippet = str((inputs or {}).get("code_snippet", {}).get("data") or "")
@@ -323,9 +331,11 @@ def main(inputs: dict, params: dict, context) -> dict:
         "user_request_len": len(user_request),
     })
 
-    if repo_url:
+    if repo_url and repo_url_is_valid:
         source_repo_dir, repo_warnings = _clone_or_update_repo(repo_url, "", sources_root)
         warnings.extend(repo_warnings)
+    elif repo_url:
+        warnings.append("repo_url missing or invalid; skipped clone")
 
     if not plugin_name:
         if repo_url:
