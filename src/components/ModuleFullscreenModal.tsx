@@ -16,7 +16,6 @@ export function ModuleFullscreenModal() {
   const editableMode = useSawStore((s) => s.editableMode)
   const pluginCatalog = useSawStore((s) => s.pluginCatalog)
   const runPluginNode = useSawStore((s) => s.runPluginNode)
-  const updateNodeCode = useSawStore((s) => s.updateNodeCode)
 
   const node = useSawStore((s) => s.nodes.find((n) => n.id === fullscreen.nodeId) ?? null)
   const plugin = useMemo(
@@ -26,13 +25,6 @@ export function ModuleFullscreenModal() {
   const [codeTab, setCodeTab] = useState<'source' | 'python'>('source')
   const refreshWorkspacePlugins = useSawStore((s) => s.refreshWorkspacePlugins)
   const [forkStatus, setForkStatus] = useState<string>('')
-  const [pythonLocked, setPythonLocked] = useState(true)
-
-  useEffect(() => {
-    // Keep fallback Python editor locked by default.
-    // Must run before any early return to preserve hook ordering.
-    setPythonLocked(true)
-  }, [fullscreen.open, fullscreen.nodeId])
 
   useEffect(() => {
     if (!fullscreen.open) return
@@ -49,7 +41,6 @@ export function ModuleFullscreenModal() {
   const wrapperPath = (plugin.sourcePaths ?? []).find((p) => p.endsWith('/wrapper.py')) ?? ''
   const isWorkspacePlugin = Boolean(manifestPath && wrapperPath)
   const isLockedStock = Boolean(isWorkspacePlugin && plugin.locked && plugin.origin === 'stock')
-  const canEditWorkspaceFiles = Boolean(editableMode && isWorkspacePlugin && !isLockedStock)
   const lastRun = node.data.runtime?.exec?.last ?? null
   const running = node.data.status === 'running'
   const rawStdout = lastRun?.rawStdout ?? ''
@@ -211,32 +202,14 @@ export function ModuleFullscreenModal() {
                             LOCKED
                           </span>
                         ) : null}
-                        <span>{canEditWorkspaceFiles ? 'unlock to edit' : 'read-only'}</span>
+                        <span>read-only</span>
                       </span>
                     ) : codeTab === 'python' ? (
-                      editableMode ? (pythonLocked ? 'locked' : 'editable') : 'read-only'
+                      editableMode ? 'editable' : 'read-only'
                     ) : (
                       'read-only'
                     )}
                   </div>
-
-                  {!isWorkspacePlugin && codeTab === 'python' ? (
-                    <button
-                      type="button"
-                      disabled={!editableMode}
-                      onClick={() => setPythonLocked((v) => !v)}
-                      className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
-                      title={
-                        !editableMode
-                          ? 'Enable Editable Mode to edit'
-                          : pythonLocked
-                            ? 'Unlock editor for editing'
-                            : 'Lock editor (read-only)'
-                      }
-                    >
-                      {pythonLocked ? 'Unlock' : 'Lock'}
-                    </button>
-                  ) : null}
                   {isLockedStock ? (
                     <button
                       type="button"
@@ -271,9 +244,9 @@ export function ModuleFullscreenModal() {
                 <div className="min-h-0 flex-1">
                   {isWorkspacePlugin ? (
                     codeTab === 'source' ? (
-                      <ReadOnlyFileViewer path={manifestPath} canEdit={canEditWorkspaceFiles} />
+                      <ReadOnlyFileViewer path={manifestPath} />
                     ) : (
-                      <ReadOnlyFileViewer path={wrapperPath} canEdit={canEditWorkspaceFiles} />
+                      <ReadOnlyFileViewer path={wrapperPath} />
                     )
                   ) : codeTab === 'source' ? (
                     <SourceViewer paths={plugin.sourcePaths ?? []} />
@@ -285,11 +258,11 @@ export function ModuleFullscreenModal() {
                         theme="vs-dark"
                         value={node.data.code}
                         onChange={(v) => {
-                          if (!editableMode || pythonLocked) return
-                          updateNodeCode(node.id, v ?? '')
+                          // legacy placeholder; node code editing removed
+                          void v
                         }}
                         options={{
-                          readOnly: !editableMode || pythonLocked,
+                          readOnly: !editableMode,
                           fontSize: 13,
                           minimap: { enabled: false },
                           wordWrap: 'on',
