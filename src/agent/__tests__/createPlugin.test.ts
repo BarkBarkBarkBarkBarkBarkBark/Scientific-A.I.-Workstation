@@ -21,7 +21,7 @@ describe('Plugin manifest schema', () => {
   it('requires entrypoint and environment', () => {
     const m = buildDiceRollerManifest({ pluginId: 'saw.generated.dice-roller' })
     // @ts-expect-error remove entrypoint
-    delete (m as any).entrypoint
+    delete m.entrypoint
     expect(() => PluginManifestSchema.parse(m)).toThrow()
   })
 

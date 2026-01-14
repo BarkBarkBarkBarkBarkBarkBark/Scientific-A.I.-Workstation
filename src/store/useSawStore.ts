@@ -72,6 +72,7 @@ type SawState = {
   tryAddEdge: (c: Connection) => void
   updateNodeParam: (nodeId: string, paramId: string, value: string | number) => void
   updateNodeInput: (nodeId: string, inputId: string, value: string | number) => void
+  updateNodeCode: (nodeId: string, code: string) => void
   openFullscreen: (nodeId: string) => void
   closeFullscreen: () => void
   refreshAiStatus: () => Promise<void>
@@ -497,6 +498,12 @@ const _useSawStore = create<SawState>((set, get) => ({
       nodes: s.nodes.map((n) =>
         n.id === nodeId ? { ...n, data: { ...n.data, inputs: { ...n.data.inputs, [inputId]: value } } } : n,
       ),
+    }))
+  },
+
+  updateNodeCode: (nodeId, code) => {
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, code } } : n)),
     }))
   },
 
