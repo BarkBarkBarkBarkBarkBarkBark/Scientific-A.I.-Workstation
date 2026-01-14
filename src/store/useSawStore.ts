@@ -878,8 +878,75 @@ const _useSawStore = create<SawState>((set, get) => ({
     const node = get().nodes.find((n) => n.id === nodeId) ?? null
     if (!node) return { ok: false, error: 'missing_node' }
     const pluginId = node.data.pluginId
+
+    const steps = get().nodes.map((n) => ({
+      nodeId: n.id,
+      pluginId: n.data.pluginId,
+      outputs: (n.data.runtime?.exec?.last?.outputs ?? {}) as any,
+    }))
+
+    function getByPath(obj: any, path: string) {
+      const parts = path.split('.').filter(Boolean)
+      let cur: any = obj
+      for (const part of parts) {
+        if (cur == null) return undefined
+        cur = cur[part]
+      }
+      return cur
+    }
+
+    function resolveExpr(exprRaw: string): any {
+      const expr = String(exprRaw || '').trim()
+      // Supported: steps.<N>.<outputId>[.<nested>...]
+      if (!expr.startsWith('steps.')) return undefined
+      const rest = expr.slice('steps.'.length)
+      const [idxStr, ...tail] = rest.split('.').filter(Boolean)
+      const idx = Number.parseInt(String(idxStr || ''), 10)
+      if (!Number.isFinite(idx) || idx < 1) return undefined
+      const step = steps[idx - 1]
+      if (!step) return undefined
+      if (tail.length === 0) return step.outputs
+      return getByPath(step.outputs, tail.join('.'))
+    }
+
+    function stringifyForInline(v: any) {
+      if (v == null) return ''
+      if (typeof v === 'string') return v
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+      try {
+        return JSON.stringify(v)
+      } catch {
+        return String(v)
+      }
+    }
+
+    function resolveValue(v: any): any {
+      if (typeof v !== 'string') return v
+      const s = v
+      const single = s.match(/^\s*\{\{\s*([^}]+?)\s*\}\}\s*$/)
+      if (single) {
+        const resolved = resolveExpr(single[1] ?? '')
+        // If token resolves to object/array/number/bool, allow passing through as-is.
+        if (resolved !== undefined) return resolved
+        return ''
+      }
+
+      // Inline replacements inside a larger string always stringify.
+      return s.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_m, inner) => {
+        const resolved = resolveExpr(String(inner ?? ''))
+        return stringifyForInline(resolved)
+      })
+    }
+
+    const resolvedInputs = Object.fromEntries(
+      Object.entries(node.data.inputs ?? {}).map(([key, value]) => [key, resolveValue(value)]),
+    )
+    const resolvedParams = Object.fromEntries(
+      Object.entries(node.data.params ?? {}).map(([key, value]) => [key, resolveValue(value)]),
+    )
+
     const inputPayload = Object.fromEntries(
-      Object.entries(node.data.inputs ?? {}).map(([key, value]) => [key, { data: value }]),
+      Object.entries(resolvedInputs).map(([key, value]) => [key, { data: value }]),
     )
 
     set((s) => ({
@@ -894,7 +961,7 @@ const _useSawStore = create<SawState>((set, get) => ({
         body: JSON.stringify({
           plugin_id: pluginId,
           inputs: inputPayload,
-          params: node.data.params ?? {},
+          params: resolvedParams,
         }),
       })
       if (!r.ok) throw new Error(await r.text())
