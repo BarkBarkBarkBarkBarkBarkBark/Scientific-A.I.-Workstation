@@ -18,5 +18,10 @@ todo.md
 __pycache__/
 *.py[cod]
 
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # Cursor local logs (avoid dirty git state during patch/apply)
 .cursor/debug.log
