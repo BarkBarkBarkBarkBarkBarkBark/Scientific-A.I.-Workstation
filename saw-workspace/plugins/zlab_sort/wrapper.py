@@ -45,6 +45,49 @@ def _find_repo_root(seed: Path) -> Path | None:
     return None
 
 
+def _default_artifacts_root(plugin_id: str) -> Path:
+    """Best-effort repo-root discovery to locate saw-workspace/artifacts."""
+    seeds = [Path.cwd(), Path(__file__).resolve()]
+    run_dir = os.environ.get("SAW_RUN_DIR") or ""
+    if run_dir:
+        seeds.insert(0, Path(run_dir))
+
+    repo_root: Path | None = None
+    for seed in seeds:
+        rr = _find_repo_root(seed)
+        if rr is not None:
+            repo_root = rr
+            break
+
+    # If we can't find the repo root, fall back to cwd.
+    base = repo_root if repo_root is not None else Path.cwd()
+    return (base / "saw-workspace" / "artifacts" / plugin_id).resolve()
+
+
+def _copy_recording_to_raw(*, src: Path, raw_session_dir: Path) -> Path:
+    raw_session_dir.mkdir(parents=True, exist_ok=True)
+
+    if src.is_dir():
+        # If a directory is provided, try to find an Intan .rhd file within.
+        candidates = sorted(src.rglob("*.rhd"))
+        if not candidates:
+            raise FileNotFoundError(f"No .rhd files found under directory: {src}")
+        src = candidates[0]
+
+    if not src.exists():
+        raise FileNotFoundError(f"Recording path does not exist: {src}")
+    if not src.is_file():
+        raise FileNotFoundError(f"Recording path is not a file: {src}")
+
+    dest = raw_session_dir / src.name
+    if dest.exists():
+        # Keep idempotent; don't overwrite unless needed.
+        return dest
+
+    shutil.copy2(src, dest)
+    return dest
+
+
 def _ensure_src_on_path(context: Any | None = None) -> None:
     """
     Make `sorting_scripts` importable in both:
@@ -242,6 +285,11 @@ def main(inputs: dict, params: dict, context) -> dict:
         virtual_env=os.environ.get("VIRTUAL_ENV") or "",
     )
     try:
+        plugin_id = "zlab.sorting_script"
+        # Force the data root into per-plugin artifacts so the UI can rely on a stable layout.
+        artifacts_root = _default_artifacts_root(plugin_id)
+        os.environ["SORTING_DATA_ROOT"] = str(artifacts_root / "data")
+
         _ensure_src_on_path(context)
 
         from sorting_scripts import zsort  # noqa: WPS433
@@ -256,6 +304,9 @@ def main(inputs: dict, params: dict, context) -> dict:
         patient = str((params or {}).get("patient") or "raw_intan")
         session = str((params or {}).get("session") or "Session1")
         recording_path = str((params or {}).get("recording_path") or "").strip()
+        # Users often paste paths with surrounding quotes; make that work.
+        if recording_path.startswith(('"', "'")) and recording_path.endswith(('"', "'")):
+            recording_path = recording_path.strip('"').strip("'")
         stream_id = str((params or {}).get("stream_id") or "0")
         probe_json = str((params or {}).get("probe_json") or "").strip()
         step = str((params or {}).get("step") or "sort_analyze").strip().lower()
@@ -275,6 +326,27 @@ def main(inputs: dict, params: dict, context) -> dict:
         )
 
         path_dict = zsort.set_paths(patient, session)
+
+        # Upload-only mode: copy recording into artifacts/data/raw/<patient>/<session>/
+        if step in ("upload", "import", "ingest"):
+            if not recording_path:
+                raise FileNotFoundError('Upload requires params.recording_path (path to .rhd file or containing folder).')
+
+            raw_session_dir = Path(path_dict["session_location"])  # raw/<patient>/<session>
+            dest = _copy_recording_to_raw(src=Path(recording_path).expanduser(), raw_session_dir=raw_session_dir)
+            path_dict["intan_file"] = str(dest)
+
+            summary = {
+                "patient": patient,
+                "session": session,
+                "step": step,
+                "uploaded_to": str(dest),
+                "paths": {k: str(v) for (k, v) in (path_dict or {}).items()},
+            }
+            summary_json = _write_output_json("summary.json", summary)
+            if summary_json:
+                summary["outputs_dir_file"] = summary_json
+            return {"summary": {"data": summary, "metadata": {}}}
 
         # GUI-only mode: do not run sorting/analyzing/curation, just launch SIGUI for an existing analyzer folder.
         if step in ("gui", "launch_gui", "sigui"):

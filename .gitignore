@@ -18,6 +18,10 @@ todo.md
 __pycache__/
 *.py[cod]
 
+# SAW plugin artifacts (keep data out of git)
+saw-workspace/artifacts/**
+!saw-workspace/artifacts/.gitkeep
+
 __pycache__/
 *.pyc
 *.pyo
