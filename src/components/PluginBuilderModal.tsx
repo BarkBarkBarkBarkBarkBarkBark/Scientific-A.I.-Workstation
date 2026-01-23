@@ -1,7 +1,8 @@
 import Editor from '@monaco-editor/react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
+import { ResizableDivider } from './ui/ResizableDivider'
 
 function sanitizePluginId(raw: string): string {
   const s = String(raw ?? '').trim()
@@ -48,10 +49,28 @@ export function PluginBuilderModal(props: { open: boolean; onClose: () => void }
   const applyPatch = useSawStore((s) => s.applyPatch)
   const grantWriteCaps = useSawStore((s) => s.grantWriteCaps)
   const refreshWorkspacePlugins = useSawStore((s) => s.refreshWorkspacePlugins)
+  const layout = useSawStore((s) => s.layout)
+  const setLayout = useSawStore((s) => s.setLayout)
 
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string>('')
   const [error, setError] = useState<string>('')
+  const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth))
+
+  useEffect(() => {
+    if (!open) return
+    setVw(typeof window === 'undefined' ? 1200 : window.innerWidth)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    const onResize = () => setVw(window.innerWidth)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [open, onClose])
 
   const [pluginIdRaw, setPluginIdRaw] = useState('zlab.sorting.kilosort')
   const pluginId = useMemo(() => sanitizePluginId(pluginIdRaw), [pluginIdRaw])
@@ -224,7 +243,10 @@ export function PluginBuilderModal(props: { open: boolean; onClose: () => void }
           }
           className="h-full overflow-hidden"
         >
-          <div className="grid h-full min-h-0 grid-cols-[420px,1fr] gap-2 p-2">
+          <div
+            className="grid h-full min-h-0 gap-2 p-2"
+            style={{ gridTemplateColumns: `${layout.pluginBuilderSettingsWidth}px 12px 1fr` }}
+          >
             <Panel title="Settings" className="min-h-0 overflow-hidden">
               <div className="h-full overflow-auto p-3">
                 <div className="space-y-3">
@@ -341,6 +363,16 @@ export function PluginBuilderModal(props: { open: boolean; onClose: () => void }
                 </div>
               </div>
             </Panel>
+
+            <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+              <ResizableDivider
+                orientation="vertical"
+                value={layout.pluginBuilderSettingsWidth}
+                setValue={(v) => setLayout({ pluginBuilderSettingsWidth: v })}
+                min={300}
+                max={Math.max(380, vw - 560)}
+              />
+            </div>
 
             <Panel title="src/script.py" className="min-h-0 overflow-hidden">
               <div className="h-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">

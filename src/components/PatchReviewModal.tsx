@@ -2,6 +2,7 @@ import Editor from '@monaco-editor/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
+import { ResizableDivider } from './ui/ResizableDivider'
 
 function joinDiffs(diffs: string[]) {
   const parts = diffs
@@ -15,12 +16,15 @@ export function PatchReviewModal() {
   const patchReview = useSawStore((s) => s.patchReview)
   const closePatchReview = useSawStore((s) => s.closePatchReview)
   const applyPatchProposal = useSawStore((s) => s.applyPatchProposal)
+  const layout = useSawStore((s) => s.layout)
+  const setLayout = useSawStore((s) => s.setLayout)
 
   const proposal = patchReview.proposal
   const files = proposal?.files ?? []
 
   const [selectedPath, setSelectedPath] = useState<string>('')
   const [commitMsg, setCommitMsg] = useState<string>('')
+  const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth))
 
   const selected = useMemo(() => {
     if (!proposal) return null
@@ -32,10 +36,13 @@ export function PatchReviewModal() {
     if (!patchReview.open) return
     setSelectedPath(files[0]?.path ?? '')
     setCommitMsg(proposal ? `SAW: ${proposal.summary || 'apply patch'}` : 'SAW: apply patch')
+    setVw(typeof window === 'undefined' ? 1200 : window.innerWidth)
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closePatchReview()
     }
+    const onResize = () => setVw(window.innerWidth)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', onResize)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patchReview.open])
@@ -66,7 +73,10 @@ export function PatchReviewModal() {
           }
           className="h-full overflow-hidden"
         >
-          <div className="grid h-full min-h-0 grid-cols-[320px,1fr] gap-2 p-2">
+          <div
+            className="grid h-full min-h-0 gap-2 p-2"
+            style={{ gridTemplateColumns: `${layout.patchReviewFilesWidth}px 12px 1fr` }}
+          >
             <Panel title={`Files (${files.length})`} className="min-h-0 overflow-hidden">
               <div className="h-full overflow-auto p-2">
                 <div className="space-y-1">
@@ -92,6 +102,16 @@ export function PatchReviewModal() {
                 </div>
               </div>
             </Panel>
+
+            <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+              <ResizableDivider
+                orientation="vertical"
+                value={layout.patchReviewFilesWidth}
+                setValue={(v) => setLayout({ patchReviewFilesWidth: v })}
+                min={240}
+                max={Math.max(320, vw - 520)}
+              />
+            </div>
 
             <div className="min-h-0 space-y-2">
               <Panel title="Summary" className="overflow-hidden">

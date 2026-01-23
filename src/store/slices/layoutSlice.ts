@@ -25,6 +25,12 @@ export function createLayoutSlice(set: any, get: any): Pick<
       rightWidthOpen: 340,
       rightCollapsed: false,
       bottomHeight: 240,
+
+      patchReviewFilesWidth: 320,
+      pluginBuilderSettingsWidth: 420,
+      moduleFullscreenLeftWidth: 760,
+      moduleFullscreenDirTreeWidth: 280,
+      todoEditorWidth: 520,
     },
     consoleFullscreen: false,
 

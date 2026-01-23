@@ -31,6 +31,13 @@ export type SawState = {
     rightWidthOpen: number
     rightCollapsed: boolean
     bottomHeight: number
+
+    // Additional resizable panes
+    patchReviewFilesWidth: number
+    pluginBuilderSettingsWidth: number
+    moduleFullscreenLeftWidth: number
+    moduleFullscreenDirTreeWidth: number
+    todoEditorWidth: number
   }
   consoleFullscreen: boolean
 

@@ -8,8 +8,13 @@ const DOCS = [
   { id: 'agent', title: 'Agent workspace', path: 'saw-workspace/agent/agent_workspace.md' },
 ] as const
 type DocId = (typeof DOCS)[number]['id']
+import { useSawStore } from '../store/useSawStore'
+import { ResizableDivider } from './ui/ResizableDivider'
 
 export function TodoPanel() {
+  const layout = useSawStore((s) => s.layout)
+  const setLayout = useSawStore((s) => s.setLayout)
+
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -17,6 +22,7 @@ export function TodoPanel() {
   const [content, setContent] = useState<string>('') // last loaded
   const [draft, setDraft] = useState<string>('') // editable
   const dirty = draft !== content
+  const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth))
 
   const doc = useMemo(() => DOCS.find((d) => d.id === activeDoc) ?? DOCS[0], [activeDoc])
   const lines = useMemo(() => parseTodoRenderLines(draft), [draft])
@@ -58,6 +64,13 @@ export function TodoPanel() {
     void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.path])
+
+  useEffect(() => {
+    setVw(typeof window === 'undefined' ? 1200 : window.innerWidth)
+    const onResize = () => setVw(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   return (
     <div className="h-full overflow-hidden">
@@ -109,7 +122,10 @@ export function TodoPanel() {
         <div className="h-full overflow-auto p-3 text-[12px] text-red-300">{error}</div>
       ) : (
         <div className="h-full min-h-0 overflow-hidden p-3">
-          <div className="grid h-full min-h-0 grid-cols-2 gap-3">
+          <div
+            className="grid h-full min-h-0 gap-3"
+            style={{ gridTemplateColumns: `${layout.todoEditorWidth}px 12px 1fr` }}
+          >
             <div className="min-h-0 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
               <Editor
                 height="100%"
@@ -125,6 +141,17 @@ export function TodoPanel() {
                 }}
               />
             </div>
+
+            <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+              <ResizableDivider
+                orientation="vertical"
+                value={layout.todoEditorWidth}
+                setValue={(v) => setLayout({ todoEditorWidth: v })}
+                min={320}
+                max={Math.max(420, vw - 520)}
+              />
+            </div>
+
             <div className="min-h-0 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 text-[12px] leading-relaxed text-zinc-200">
               {lines.length === 0 ? (
                 <div className="text-zinc-500">(empty)</div>

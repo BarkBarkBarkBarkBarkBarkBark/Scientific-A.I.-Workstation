@@ -2,6 +2,7 @@ import Editor from '@monaco-editor/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
+import { ResizableDivider } from './ui/ResizableDivider'
 import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
 import { SourceViewer } from './SourceViewer'
 import { IngestDirectoryModule } from './modules/IngestDirectoryModule'
@@ -70,6 +71,8 @@ export function ModuleFullscreenModal() {
   const editableMode = useSawStore((s) => s.editableMode)
   const pluginCatalog = useSawStore((s) => s.pluginCatalog)
   const runPluginNode = useSawStore((s) => s.runPluginNode)
+  const layout = useSawStore((s) => s.layout)
+  const setLayout = useSawStore((s) => s.setLayout)
 
   const node = useSawStore((s) => s.nodes.find((n) => n.id === fullscreen.nodeId) ?? null)
   const plugin = useMemo(
@@ -84,13 +87,17 @@ export function ModuleFullscreenModal() {
   const [dirErr, setDirErr] = useState<string>('')
   const [dirSelectedPath, setDirSelectedPath] = useState<string>('')
   const [dirRootInUse, setDirRootInUse] = useState<string>('')
+  const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1400 : window.innerWidth))
 
   useEffect(() => {
     if (!fullscreen.open) return
+    setVw(typeof window === 'undefined' ? 1400 : window.innerWidth)
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeFullscreen()
     }
+    const onResize = () => setVw(window.innerWidth)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', onResize)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [fullscreen.open, closeFullscreen])
 
@@ -204,7 +211,10 @@ export function ModuleFullscreenModal() {
           }
           className="h-full overflow-hidden"
         >
-          <div className="grid h-full grid-cols-[1.1fr,0.9fr] gap-2 p-2">
+          <div
+            className="grid h-full min-h-0 gap-2 p-2"
+            style={{ gridTemplateColumns: `${layout.moduleFullscreenLeftWidth}px 12px 1fr` }}
+          >
             <Panel title="Module" className="min-h-0 overflow-hidden">
               <div className="h-full overflow-auto p-3">
                 <div className="space-y-3">
@@ -312,6 +322,16 @@ export function ModuleFullscreenModal() {
               </div>
             </Panel>
 
+            <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+              <ResizableDivider
+                orientation="vertical"
+                value={layout.moduleFullscreenLeftWidth}
+                setValue={(v) => setLayout({ moduleFullscreenLeftWidth: v })}
+                min={360}
+                max={Math.max(520, vw - 520)}
+              />
+            </div>
+
             <Panel title="Code" className="min-h-0 overflow-hidden">
               <div className="flex h-full min-h-0 flex-col gap-2 p-2">
                 <div className="flex items-center gap-2">
@@ -408,7 +428,10 @@ export function ModuleFullscreenModal() {
                     ) : codeTab === 'python' ? (
                       <ReadOnlyFileViewer path={wrapperPath} />
                     ) : (
-                      <div className="grid h-full min-h-0 grid-cols-[280px,1fr] gap-2">
+                      <div
+                        className="grid h-full min-h-0 gap-2"
+                        style={{ gridTemplateColumns: `${layout.moduleFullscreenDirTreeWidth}px 12px 1fr` }}
+                      >
                         <div className="min-h-0 overflow-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-2">
                           <div className="mb-2">
                             <div className="text-[11px] font-semibold text-zinc-300">{dirRootInUse || pluginArtifactsRoot || pluginRoot || 'Directory'}</div>
@@ -430,6 +453,16 @@ export function ModuleFullscreenModal() {
                               {dirErr ? `Directory unavailable: ${dirErr}` : 'Loading…'}
                             </div>
                           )}
+                        </div>
+
+                        <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+                          <ResizableDivider
+                            orientation="vertical"
+                            value={layout.moduleFullscreenDirTreeWidth}
+                            setValue={(v) => setLayout({ moduleFullscreenDirTreeWidth: v })}
+                            min={200}
+                            max={Math.max(260, vw - 720)}
+                          />
                         </div>
                         <div className="min-h-0 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
                           {dirSelectedPath ? (

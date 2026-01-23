@@ -25,6 +25,12 @@ export function App() {
         rightWidthOpen: 340,
         rightCollapsed: false,
         bottomHeight: 240,
+
+        patchReviewFilesWidth: 320,
+        pluginBuilderSettingsWidth: 420,
+        moduleFullscreenLeftWidth: 760,
+        moduleFullscreenDirTreeWidth: 280,
+        todoEditorWidth: 520,
       },
   )
   const setLayout = useSawStore((s) => s.setLayout)
@@ -69,7 +75,7 @@ export function App() {
       {/**/}
       <div
         className="grid h-full gap-0"
-        style={{ gridTemplateRows: `48px auto 1fr 10px ${layout.bottomHeight}px` }}
+        style={{ gridTemplateRows: `48px auto 1fr 12px ${layout.bottomHeight}px` }}
       >
         <TopBar />
         <GoalBox />
@@ -78,12 +84,12 @@ export function App() {
           <div
             className="grid h-full min-h-0 gap-2"
             style={{
-              gridTemplateColumns: `${layout.leftWidth}px 6px 1fr 6px ${layout.rightWidth}px`,
+              gridTemplateColumns: `${layout.leftWidth}px 12px 1fr 12px ${layout.rightWidth}px`,
             }}
           >
             <PluginBrowser />
 
-            <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+            <div className="h-full">
               <ResizableDivider
                 orientation="vertical"
                 value={layout.leftWidth}
@@ -95,7 +101,7 @@ export function App() {
 
             {layoutMode === 'pipeline' ? <PipelineBuilder /> : <NodeCanvas />}
 
-            <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+            <div className="h-full">
               <ResizableDivider
                 orientation="vertical"
                 value={layout.rightWidth}
@@ -109,11 +115,12 @@ export function App() {
           </div>
         </div>
 
-        <div className="mx-2 rounded-md border border-zinc-800 bg-zinc-950/60">
+        <div className="mx-2">
           <ResizableDivider
             orientation="horizontal"
             value={layout.bottomHeight}
             setValue={(v) => setLayout({ bottomHeight: v })}
+            invert
             min={160}
             max={Math.max(200, vh - 160)}
           />

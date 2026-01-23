@@ -18,6 +18,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+
 class ContextLogHandler(logging.Handler):
     def __init__(self, saw_context: Any) -> None:
         super().__init__(logging.INFO)

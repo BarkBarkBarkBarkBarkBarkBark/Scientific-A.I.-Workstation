@@ -10,42 +10,77 @@ export function ResizableDivider(props: {
   setValue: (v: number) => void
   min: number
   max: number
+  invert?: boolean
 }) {
   const start = useRef<{ p: number; v: number } | null>(null)
+
+  const isVertical = props.orientation === 'vertical'
+
+  const begin = (p: number) => {
+    start.current = { p, v: props.value }
+  }
+
+  const move = (pNow: number) => {
+    if (!start.current) return
+    const delta = pNow - start.current.p
+    const signedDelta = props.invert ? -delta : delta
+    const next = clamp(start.current.v + signedDelta, props.min, props.max)
+    props.setValue(next)
+  }
+
+  const end = () => {
+    start.current = null
+  }
 
   return (
     <div
       className={[
-        'group flex items-stretch justify-stretch select-none touch-none',
-        props.orientation === 'vertical' ? 'cursor-col-resize' : 'cursor-row-resize',
+        'group relative select-none touch-none',
+        isVertical ? 'cursor-col-resize' : 'cursor-row-resize',
+        'w-full h-full',
       ].join(' ')}
       onPointerDown={(e) => {
         e.preventDefault()
         ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
-        start.current = {
-          p: props.orientation === 'vertical' ? e.clientX : e.clientY,
-          v: props.value,
-        }
+        begin(isVertical ? e.clientX : e.clientY)
       }}
       onPointerMove={(e) => {
-        if (!start.current) return
-        const pNow = props.orientation === 'vertical' ? e.clientX : e.clientY
-        const delta = pNow - start.current.p
-        const next = clamp(start.current.v + delta, props.min, props.max)
-        props.setValue(next)
+        move(isVertical ? e.clientX : e.clientY)
       }}
       onPointerUp={() => {
-        start.current = null
+        end()
+      }}
+      onPointerCancel={() => {
+        end()
+      }}
+      // Mouse fallback (helps on some Safari builds where PointerEvents can be inconsistent)
+      onMouseDown={(e) => {
+        // If PointerEvents is working, onPointerDown will already have run.
+        if (start.current) return
+        e.preventDefault()
+        begin(isVertical ? e.clientX : e.clientY)
+
+        const onMove = (ev: MouseEvent) => move(isVertical ? ev.clientX : ev.clientY)
+        const onUp = () => {
+          window.removeEventListener('mousemove', onMove)
+          window.removeEventListener('mouseup', onUp)
+          end()
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
       }}
     >
-      <div
-        className={[
-          'w-full h-full',
-          'bg-zinc-800/30',
-          'group-hover:bg-emerald-700/25',
-          'transition-colors',
-        ].join(' ')}
-      />
+      {/* Large hit area with a centered 1px line (VS Code-ish) */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div
+          className={[
+            'transition-colors',
+            'bg-zinc-800/60',
+            'group-hover:bg-emerald-700/35',
+            isVertical ? 'h-full w-px' : 'h-px w-full',
+          ].join(' ')}
+        />
+      </div>
     </div>
   )
 }
