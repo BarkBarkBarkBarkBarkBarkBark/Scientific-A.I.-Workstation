@@ -5,6 +5,7 @@ import { PluginBuilderModal } from './PluginBuilderModal'
 
 export function PluginBrowser() {
   const [q, setQ] = useState('')
+  const [viewMode, setViewMode] = useState<'flat' | 'tree'>('flat')
   const [builderOpen, setBuilderOpen] = useState(false)
   const layout = useSawStore((s) => s.layout)
   const toggleLeftSidebar = useSawStore((s) => s.toggleLeftSidebar)
@@ -23,6 +24,16 @@ export function PluginBrowser() {
       )
     })
   }, [q, catalog])
+
+  const flatSorted = useMemo(() => {
+    const copy = [...filtered]
+    copy.sort((a, b) => {
+      const n = a.name.localeCompare(b.name)
+      if (n !== 0) return n
+      return a.id.localeCompare(b.id)
+    })
+    return copy
+  }, [filtered])
 
   type CatNode =
     | { kind: 'dir'; name: string; path: string; children: CatNode[] }
@@ -120,7 +131,7 @@ export function PluginBrowser() {
     const render = (n: CatNode): JSX.Element => {
       if (n.kind === 'leaf') {
         return (
-          <details key={n.path} className="select-none">
+          <details key={n.path} className="select-none" open>
             <summary className="cursor-pointer px-1.5 py-1 text-xs font-semibold text-zinc-300 hover:text-zinc-100">
               {n.name}/ <span className="text-zinc-600">({n.pluginIds.length})</span>
             </summary>
@@ -132,7 +143,7 @@ export function PluginBrowser() {
       }
 
       return (
-        <details key={n.path} className="select-none">
+        <details key={n.path} className="select-none" open>
           <summary className="cursor-pointer px-1.5 py-1 text-xs font-semibold text-zinc-200 hover:text-zinc-100">
             {n.name}/ <span className="text-zinc-700">({countPlugins(n)})</span>
           </summary>
@@ -162,6 +173,14 @@ export function PluginBrowser() {
                 {catalog.length}
               </span>
             </div>
+            <button
+              type="button"
+              onClick={() => setViewMode((v) => (v === 'flat' ? 'tree' : 'flat'))}
+              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+              title={viewMode === 'flat' ? 'Switch to nested tree view' : 'Switch to flat plugin list'}
+            >
+              {viewMode === 'flat' ? 'Tree' : 'Flat'}
+            </button>
             <button
               type="button"
               onClick={() => setBuilderOpen(true)}
@@ -215,18 +234,24 @@ export function PluginBrowser() {
 
         {!layout.leftCollapsed && (
           <div className="saw-scroll min-h-0 flex-1 overflow-y-scroll pr-1">
-            {q.trim() ? (
+            {q.trim() || viewMode === 'flat' ? (
               <div className="space-y-0.5">
-                {filtered.map((p) => (
+                {flatSorted.map((p) => (
                   <div
                     key={p.id}
-                    draggable
+                    draggable={!layout.leftCollapsed}
                     onDragStart={(e) => {
+                      if (layout.leftCollapsed) return
                       e.dataTransfer.setData('application/saw-plugin', p.id)
                       e.dataTransfer.setData('text/plain', p.id)
                       e.dataTransfer.effectAllowed = 'copy'
                     }}
-                    className="cursor-grab rounded px-1.5 py-1 text-xs text-zinc-200 hover:bg-zinc-900/60 active:cursor-grabbing"
+                    className={[
+                      'rounded px-1.5 py-1 text-xs text-zinc-200',
+                      layout.leftCollapsed
+                        ? 'opacity-60'
+                        : 'cursor-grab hover:bg-zinc-900/60 active:cursor-grabbing',
+                    ].join(' ')}
                     title={`${p.name}\n\n${p.id}\n\n${p.description}`}
                   >
                     <div className="flex items-center gap-2">

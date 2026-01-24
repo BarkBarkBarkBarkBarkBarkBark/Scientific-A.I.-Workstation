@@ -1,0 +1,72 @@
+id: saw.health.checker
+name: API Health Checker
+version: 0.1.0
+description: Probe SAW/Patch Engine/Vite API endpoints defined in saw-workspace/machine-context/api_endpoints.json
+  and report reachability/latency.
+category_path: devtools/health
+entrypoint:
+  file: wrapper.py
+  callable: main
+environment:
+  python: '>=3.11,<3.13'
+  pip: []
+inputs:
+  endpoints_json:
+    type: path
+    default: machine-context/api_endpoints.json
+    ui:
+      label: api_endpoints.json (workspace-relative)
+params:
+  timeout_sec:
+    type: number
+    default: 3
+    ui:
+      label: Timeout (seconds)
+  frontend_url:
+    type: string
+    default: http://127.0.0.1:5173
+    ui:
+      label: Frontend (Vite) base URL (for /api/ai/*)
+  sample_plugin_id:
+    type: string
+    default: saw.template.plugin
+    ui:
+      label: Sample plugin id for {plugin_id} paths
+  sample_run_id:
+    type: string
+    default: does_not_exist
+    ui:
+      label: Sample run id for {run_id} paths
+  sample_service_id:
+    type: string
+    default: does_not_exist
+    ui:
+      label: Sample service id for {service_id} paths
+  allow_ai:
+    type: string
+    default: 'false'
+    ui:
+      label: Allow AI-cost endpoints (true/false)
+  allow_writes:
+    type: string
+    default: 'false'
+    ui:
+      label: Allow DB/file write endpoints (true/false)
+  allow_plugins:
+    type: string
+    default: 'false'
+    ui:
+      label: Allow plugin-execution endpoints (true/false)
+outputs:
+  report:
+    type: object
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: allowed
+  disk: read_only
+  subprocess: forbidden
+resources:
+  gpu: forbidden
+  threads: 1

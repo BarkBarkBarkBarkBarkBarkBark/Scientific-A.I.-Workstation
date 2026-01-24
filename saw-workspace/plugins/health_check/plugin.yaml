@@ -1,0 +1,33 @@
+id: health_check
+name: health_check
+version: 0.1.0
+description: ''
+category_path: null
+entrypoint:
+  file: wrapper.py
+  callable: main
+environment:
+  python: '>=3.11,<3.13'
+  pip: []
+inputs:
+  file:
+    type: path
+params: {}
+outputs:
+  result:
+    type: object
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: none
+  disk: read_only
+  subprocess: forbidden
+resources:
+  gpu: forbidden
+  threads: 1
+ui:
+  mode: schema
+  schema_file: ui.yaml
+  bundle_file: ui/ui.bundle.js
+  sandbox: true
