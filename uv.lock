@@ -575,6 +575,16 @@ wheels = [
 ]
 
 [[package]]
+name = "github-copilot-sdk"
+version = "0.1.0"
+source = { git = "https://github.com/github/copilot-sdk.git?subdirectory=python#0f4ed59124d88d2cd2f16cc533533822bfb01f11" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2339,6 +2349,7 @@ dependencies = [
     { name = "filelock" },
     { name = "fonttools" },
     { name = "fsspec" },
+    { name = "github-copilot-sdk" },
     { name = "h11" },
     { name = "h5py" },
     { name = "hdmf" },
@@ -2483,6 +2494,7 @@ requires-dist = [
     { name = "filelock", specifier = "==3.20.3" },
     { name = "fonttools", specifier = "==4.61.1" },
     { name = "fsspec", specifier = "==2026.1.0" },
+    { name = "github-copilot-sdk", git = "https://github.com/github/copilot-sdk.git?subdirectory=python" },
     { name = "h11", specifier = "==0.16.0" },
     { name = "h5py", specifier = "==3.15.1" },
     { name = "hdmf", specifier = "==4.2.0" },
