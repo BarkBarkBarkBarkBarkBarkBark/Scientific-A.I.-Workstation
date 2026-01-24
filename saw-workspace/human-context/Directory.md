@@ -1,0 +1,59 @@
+Scientific AI Workstation
+    saw-workspace
+        agent
+            agent_workspace.md
+        artifacts
+            <plugin_name>
+                <plugin_data>
+        machine-context
+              
+        machine-specs
+        plugins
+        sources
+        .gitkeep
+        todo.md
+    scripts
+        dev_all_linux.sh
+        dev_all_mac.sh
+        dev_all_windows.ps1
+        linux_init.sh
+    services
+        db
+        patch_engine
+        saw_api
+    src
+        agent
+        ai
+        audio
+        components
+        dev
+        markdown
+        patching
+        plugins
+        store
+        types
+        ai.ts
+        patch.ts
+        saw.ts  
+
+---
+
+.gitignore
+.gitmodules
+.npmrc
+docker-compose.yml
+index.hyml
+package-lock.json
+package.json
+postcss.config.cjs
+pyproject.toml
+readme.md
+requirements.txt
+tailwind.config.ts
+tsconfig.app.json
+tsconfig.app.tsbuildinfo
+tsconfig.json
+tsconfig.node.json
+tsconfig.node.tsbuildinfo
+uv.lock
+vite.config.ts
