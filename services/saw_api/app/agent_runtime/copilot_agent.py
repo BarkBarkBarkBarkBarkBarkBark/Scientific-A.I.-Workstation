@@ -82,14 +82,115 @@ class CopilotAgentManager:
 
     def __init__(self) -> None:
         self._client: Optional[CopilotClient] = None
+        self._client_opts: dict[str, Any] = {}
         self._convs: dict[str, _CopilotConversation] = {}
         self._tools = self._build_tools()
+
+        # Warmup diagnostics (used for /health).
+        self._warmup_started: bool = False
+        self._warmup_ok: bool = False
+        self._warmup_error: str | None = None
+        self._warmup_models_ok: bool = False
+        self._warmup_models_error: str | None = None
+        self._warmup_models_count: int | None = None
+
+    async def warmup(self) -> None:
+        """Eagerly start/connect the Copilot CLI transport.
+
+        By default SAW starts Copilot lazily on first Copilot request.
+        In dev or managed environments it's useful to fail fast at startup
+        (missing CLI, TLS issues, auth issues, port conflicts).
+        """
+        self._warmup_started = True
+        try:
+            client = await self._ensure_client()
+            # Verify the transport is actually usable (auth/network/TLS), not just connected.
+            # A common failure mode behind corporate TLS is models.list failing.
+            models = await asyncio.wait_for(client.list_models(), timeout=15.0)
+            self._warmup_models_ok = True
+            self._warmup_models_error = None
+            self._warmup_models_count = len(models or [])
+            self._warmup_ok = True
+            self._warmup_error = None
+        except Exception as exc:
+            self._warmup_ok = False
+            self._warmup_error = str(exc)
+            self._warmup_models_ok = False
+            self._warmup_models_error = str(exc)
+            self._warmup_models_count = None
+            raise
+
+    def health_status(self) -> dict[str, Any]:
+        """Best-effort Copilot transport status for /health."""
+        opts = dict(self._client_opts or {})
+        # Avoid dumping the full env into health responses.
+        if "env" in opts:
+            opts["env"] = "<redacted>"
+        return {
+            "warmup_started": bool(self._warmup_started),
+            "warmup_ok": bool(self._warmup_ok),
+            "warmup_error": self._warmup_error,
+            "models_ok": bool(self._warmup_models_ok),
+            "models_error": self._warmup_models_error,
+            "models_count": self._warmup_models_count,
+            "client_config": opts,
+        }
 
     async def _ensure_client(self) -> CopilotClient:
         if self._client:
             return self._client
-        cli_path = (os.environ.get("COPILOT_CLI_PATH") or "copilot").strip()
-        self._client = CopilotClient({"cli_path": cli_path, "auto_start": True, "use_stdio": True})
+
+        # Copilot CLI is implemented on Node. In some environments (notably macOS
+        # with SSL interception/corporate roots), Node may not trust the relevant
+        # certificate roots by default.
+        #
+        # We pass an explicit env to the Copilot CLI subprocess to ensure these
+        # variables are applied even under reloaders/process managers.
+        env = os.environ.copy()
+
+        # Default: try Node system CAs (opt-out via SAW_COPILOT_USE_SYSTEM_CA=0).
+        if (env.get("SAW_COPILOT_USE_SYSTEM_CA") or "1").strip() not in ("0", "false", "False"):
+            existing = env.get("NODE_OPTIONS") or ""
+            if "--use-system-ca" not in existing:
+                env["NODE_OPTIONS"] = (existing + " --use-system-ca").strip()
+
+        # Optional: explicitly provide a CA bundle file for Node.
+        # This is often required when the relevant root is in the login keychain
+        # (or corporate-managed) and Node still fails with "unable to get issuer certificate".
+        extra_ca = (env.get("SAW_COPILOT_EXTRA_CA_CERTS") or "").strip()
+        if extra_ca:
+            env["NODE_EXTRA_CA_CERTS"] = extra_ca
+
+        # Transport selection
+        # - Default: stdio server mode (fast + avoids port management)
+        # - Optional: TCP server mode on an explicit port (closer to docs/examples)
+        # - Optional: connect to an externally managed Copilot CLI server
+        cli_url = (env.get("SAW_COPILOT_CLI_URL") or "").strip()
+        port_raw = (env.get("SAW_COPILOT_SERVER_PORT") or "").strip()
+        port: int = 0
+        if port_raw:
+            try:
+                port = int(port_raw)
+            except Exception:
+                port = 0
+
+        if cli_url:
+            # External server: SAW will not spawn the Copilot CLI process.
+            opts: dict[str, Any] = {"cli_url": cli_url}
+            self._client_opts = dict(opts)
+            self._client = CopilotClient(opts)
+        else:
+            cli_path = (env.get("COPILOT_CLI_PATH") or "copilot").strip()
+            # If a port is provided, run in TCP server mode; else use stdio.
+            use_stdio = port <= 0
+            opts: dict[str, Any] = {"cli_path": cli_path, "auto_start": True, "use_stdio": bool(use_stdio), "env": env}
+            log_level = (env.get("SAW_COPILOT_LOG_LEVEL") or "").strip().lower()
+            if log_level in ("none", "error", "warning", "info", "debug", "all"):
+                opts["log_level"] = log_level
+            if port > 0:
+                opts["port"] = port
+            self._client_opts = dict(opts)
+            self._client = CopilotClient(opts)
         await self._client.start()
         return self._client
 
@@ -223,16 +324,24 @@ class CopilotAgentManager:
             ),
         }
 
-        session = await client.create_session(
-            {
-                "tools": self._tools,
-                "available_tools": [t.name for t in self._tools],
-                "system_message": system_message,
-                "streaming": True,
-                # Permission requests from the Copilot CLI runtime itself.
-                "on_permission_request": self._on_permission_request,
-            }
-        )
+        session_cfg: dict[str, Any] = {
+            "tools": self._tools,
+            "available_tools": [t.name for t in self._tools],
+            "system_message": system_message,
+            "streaming": True,
+            # Permission requests from the Copilot CLI runtime itself.
+            "on_permission_request": self._on_permission_request,
+        }
+
+        # Model selection (optional).
+        # This is distinct from SAW_AGENT_MODEL (OpenAI provider) and only affects Copilot sessions.
+        # Note: Copilot CLI supports a limited set of model identifiers.
+        # Default to a Copilot-CLI-supported model id.
+        copilot_model = (os.environ.get("SAW_COPILOT_MODEL") or "gpt-5.2").strip()
+        if copilot_model:
+            session_cfg["model"] = copilot_model
+
+        session = await client.create_session(session_cfg)
 
         # Use Copilot session id as stable conversation id if not provided.
         cid2 = cid or session.session_id
@@ -280,6 +389,8 @@ class CopilotAgentManager:
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
         conv.queue = q
 
+        done = asyncio.Event()
+
         def on_event(evt: SessionEvent) -> None:
             # Translate a subset of Copilot session events into SAW events.
             try:
@@ -292,9 +403,11 @@ class CopilotAgentManager:
                     conv.emit(_saw_event(conv.conversation_id, "assistant.message", {"content": content}))
                 elif evt.type == SessionEventType.SESSION_IDLE:
                     conv.emit(_saw_event(conv.conversation_id, "session.idle", {}))
+                    done.set()
                 elif evt.type == SessionEventType.SESSION_ERROR:
                     msg = evt.data.message or str(evt.data.error or "session_error")
                     conv.emit(_saw_event(conv.conversation_id, "session.error", {"message": msg}))
+                    done.set()
             except Exception:
                 pass
 
@@ -306,7 +419,11 @@ class CopilotAgentManager:
             settings = get_settings()
             try:
                 async with conv.lock:
-                    await conv.session.send({"prompt": str(message or "")})
+                    # IMPORTANT:
+                    # `send()` returns as soon as the message is accepted and may return
+                    # before any streaming events are delivered. Using `send_and_wait()`
+                    # keeps the subscription alive until the session reaches idle/error.
+                    await conv.session.send_and_wait({"prompt": str(message or "")}, timeout=120.0)
             except Exception as exc:
                 append_agent_event(
                     settings,

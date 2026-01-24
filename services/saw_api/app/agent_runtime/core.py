@@ -80,7 +80,7 @@ def _mentions_plugin_ambiguous(text: str) -> bool:
 
 def agent_model() -> str:
     # Prefer a dedicated agent model override; fall back to OPENAI_MODEL; then a sane default.
-    return (os.environ.get("SAW_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini").strip()
+    return (os.environ.get("SAW_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or "gpt-4o").strip()
 
 
 def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:

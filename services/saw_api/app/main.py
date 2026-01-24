@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import json
 import os
@@ -73,12 +74,26 @@ def _startup() -> None:
         # Don't fail API startup in dev; endpoints can still be used to debug.
         pass
 
+    # Optional: eagerly start the Copilot CLI transport so failures show up
+    # immediately (instead of during the first user request).
+    try:
+        if _COPILOT_AVAILABLE:
+            eager = (os.environ.get("SAW_COPILOT_EAGER_START") or "0").strip().lower() in ("1", "true", "yes", "on")
+            if eager:
+                asyncio.create_task(copilot_manager().warmup())
+    except Exception:
+        # Best-effort warmup; never block API startup.
+        pass
+
 
 class HealthResponse(BaseModel):
     ok: bool
     db_ok: bool
     db_error: str | None = None
     openai_enabled: bool
+    copilot_available: bool
+    copilot_ok: bool
+    copilot: dict[str, Any]
     at: datetime
     workspace_root: str
 
@@ -94,11 +109,32 @@ def health() -> HealthResponse:
     except Exception:
         db_ok = False
         db_error = "connect_failed"
+    copilot_available = bool(_COPILOT_AVAILABLE)
+    copilot_detail: dict[str, Any] = {}
+    copilot_ok = False
+    if copilot_available:
+        try:
+            copilot_detail = copilot_manager().health_status()
+            # Green-light behavior:
+            # - If eager start is enabled, require warmup_ok.
+            # - Otherwise, consider it ok if the SDK imported (available).
+            eager = (os.environ.get("SAW_COPILOT_EAGER_START") or "0").strip().lower() in ("1", "true", "yes", "on")
+            if eager:
+                copilot_ok = bool((copilot_detail or {}).get("warmup_ok"))
+            else:
+                copilot_ok = True
+        except Exception as e:
+            copilot_detail = {"warmup_started": False, "warmup_ok": False, "warmup_error": str(e), "client_config": {}}
+            copilot_ok = False
+
     return HealthResponse(
         ok=True,
         db_ok=db_ok,
         db_error=db_error,
         openai_enabled=bool(settings.openai_api_key),
+        copilot_available=copilot_available,
+        copilot_ok=bool(copilot_ok),
+        copilot=copilot_detail,
         at=datetime.utcnow(),
         workspace_root=settings.workspace_root,
     )
@@ -174,7 +210,15 @@ async def agent_chat_post(req: AgentChatRequest, stream: bool = Query(False), pr
         # Drain queue until idle or error.
         try:
             while True:
-                ev = await q.get()
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # Keep the SSE connection alive during long-running turns
+                    # (e.g., Copilot CLI retries on network/TLS issues).
+                    # Comment frames are ignored by standard SSE clients.
+                    yield ": keepalive\n\n"
+                    continue
+
                 yield f"event: saw.agent.event\ndata: {json.dumps(ev)}\n\n"
                 if ev.get("type") in ("session.idle", "session.error"):
                     break

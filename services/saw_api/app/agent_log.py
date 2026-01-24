@@ -1,16 +1,27 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 import re
 import time
 from typing import Any
 
+from zoneinfo import ZoneInfo
+
 from .settings import Settings
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+_PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def _ts_pacific(ms: int) -> str:
+    # ISO-8601 with numeric offset, in America/Los_Angeles (PST/PDT).
+    return datetime.fromtimestamp(ms / 1000.0, tz=_PACIFIC_TZ).isoformat(timespec="seconds")
 
 
 def _repo_root_from_workspace(workspace_root: str) -> str:
@@ -67,7 +78,8 @@ def append_agent_event(settings: Settings, event: dict[str, Any]) -> None:
         return
     try:
         os.makedirs(_saw_dir(settings), exist_ok=True)
-        payload = {"ts": _now_ms(), **(event or {})}
+        ts = _now_ms()
+        payload = {"ts": ts, "ts_pacific": _ts_pacific(ts), **(event or {})}
         with open(agent_log_path(settings), "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:

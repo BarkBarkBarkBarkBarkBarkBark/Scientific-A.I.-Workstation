@@ -246,6 +246,28 @@ See `ENV_SETUP.md`.
   - One or more files still contain `<<<<<<<` / `=======` / `>>>>>>>` markers.
   - Fix those conflicts, then rerun `npm run build`.
 
+- **Copilot provider “stalls” / no response (TLS issuer certificate)**
+  - Symptom: the chat shows “Thinking…” and the API SSE stream only emits `session.started` + keepalives.
+  - Check Copilot CLI logs:
+    ```bash
+    bash scripts/copilot_cli_diag.sh
+    ```
+  - If you see: `unable to get issuer certificate`, it’s a TLS trust issue (often corporate SSL interception).
+    SAW defaults to starting Copilot with `NODE_OPTIONS=--use-system-ca`, but some environments still need an explicit CA bundle.
+  - Generate a PEM bundle from macOS keychains:
+    ```bash
+    bash scripts/export_macos_keychain_certs_pem.sh
+    ```
+  - Export it for SAW before starting the services:
+    ```bash
+    export SAW_COPILOT_EXTRA_CA_CERTS="$PWD/saw-workspace/certs/macos-keychain.pem"
+    ```
+  - Restart the SAW API (and therefore the Copilot CLI subprocess).
+    If you’re using the one-command runner:
+    ```bash
+    ./scripts/dev_all_mac.sh --frontend-port 7176 --api-port 5127
+    ```
+
 - **Agent says “Approval required” and nothing happens**
   - That’s expected: approve the tool call in the UI.
   - If approval succeeds but the write still fails, check Patch Engine caps (`.saw/caps.json`).

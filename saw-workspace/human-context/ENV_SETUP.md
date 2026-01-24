@@ -16,7 +16,7 @@ Create a `.env` file in the project root:
 
 ```bash
 OPENAI_API_KEY="sk-..."
-OPENAI_MODEL="gpt-4o-mini"
+OPENAI_MODEL="gpt-4.1"
 ```
 
 Then:

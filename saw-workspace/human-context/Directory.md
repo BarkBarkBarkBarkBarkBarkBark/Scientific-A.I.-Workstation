@@ -67,9 +67,24 @@ Scientific AI Workstation
 
     src
         agent
+            __tests__
+                createPlugin.test.ts
+            actions
+                createPlugin.ts
         ai
+            client.ts
+            planFallback.ts
         audio
+            webaudio.ts
         components
+            audio
+                Waveform.tsx
+            inspector
+                AudioLowpassInspector.ts
+            modules
+            nodes
+            plugin_ui
+            ui
         dev
         markdown
         patching

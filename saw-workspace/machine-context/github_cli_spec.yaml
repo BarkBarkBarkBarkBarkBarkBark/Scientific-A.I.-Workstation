@@ -1,0 +1,174 @@
+saw_spec_version: "0.1"
+id: "saw-copilot-cli-tls-env-scope"
+purpose: "Ensure Copilot CLI works behind TLS interception (e.g., Zscaler) without breaking other Node processes (Vite) by scoping cert env vars to Copilot only."
+
+problem_statement:
+  symptoms:
+    - "Copilot CLI fails to list models / TLS errors unless custom CA is trusted"
+    - "Setting NODE_OPTIONS=--use-system-ca globally breaks Node processes with: 'node: --use-system-ca is not allowed in NODE_OPTIONS'"
+  root_cause:
+    - "NODE_OPTIONS is inherited by all Node child processes started by dev scripts (e.g., Vite). Some Node flags are disallowed in NODE_OPTIONS."
+  solution_summary:
+    - "Do not export NODE_OPTIONS globally."
+    - "Do not export NODE_EXTRA_CA_CERTS globally unless you accept it affecting all Node tools."
+    - "Create a minimal CA PEM file (Zscaler root/intermediate only) and set NODE_EXTRA_CA_CERTS only for the Copilot process."
+    - "If NODE_OPTIONS is required, scope it to Copilot only (subshell or inline env assignment)."
+
+security_posture:
+  constraints:
+    - "Do not export full macOS keychain bundle."
+    - "Export only the Zscaler (or corporate) root CA certificate chain required for TLS interception."
+    - "Never export private keys."
+  allowed_artifacts:
+    - "saw-workspace/certs/zscaler-root.pem (public cert(s) only)"
+  forbidden_artifacts:
+    - "saw-workspace/certs/macos-keychain.pem (full keychain export) in production default path"
+    - "Any file containing private keys (-----BEGIN PRIVATE KEY-----)"
+
+expected_files:
+  - path: "saw-workspace/certs/zscaler-root.pem"
+    type: "pem"
+    description: "Minimal corporate CA bundle used by NODE_EXTRA_CA_CERTS for Copilot CLI only."
+    required: true
+  - path: "scripts/dev_all.sh"
+    type: "bash"
+    description: "Dev orchestrator that starts saw_api, patch_engine, frontend (vite), and optional copilot server."
+    required: false
+
+environment:
+  variables:
+    - name: "SAW_COPILOT_CA_PEM"
+      required: true
+      scope: "copilot_only"
+      description: "Absolute path to minimal CA bundle (zscaler-root.pem)."
+      example: "/Users/marco/Cursor_Folder/Cursor_Codespace/Scientific-AI-Workstation/saw-workspace/certs/zscaler-root.pem"
+    - name: "NODE_EXTRA_CA_CERTS"
+      required: true
+      scope: "copilot_only"
+      value_from: "SAW_COPILOT_CA_PEM"
+      description: "Node/CLI extra trusted CAs; must be set ONLY for Copilot process."
+    - name: "NODE_OPTIONS"
+      required: false
+      scope: "copilot_only"
+      description: "Optional; if needed, use --use-system-ca but never export globally."
+      example: "--use-system-ca"
+    - name: "SAW_COPILOT_SERVER_PORT"
+      required: false
+      default: 4321
+      scope: "copilot_only"
+
+implementation_requirements:
+  invariants:
+    - "No global export of NODE_OPTIONS in any dev/start scripts."
+    - "No global export of NODE_EXTRA_CA_CERTS in dev/start scripts unless explicitly desired."
+    - "Copilot CLI must receive NODE_EXTRA_CA_CERTS (and optionally NODE_OPTIONS) only in its own process environment."
+  acceptable_patterns:
+    - pattern: "inline_env_assignment"
+      description: "Set env vars on the same command line for copilot only."
+      example: |
+        SAW_COPILOT_CA_PEM="/abs/path/saw-workspace/certs/zscaler-root.pem" \
+        NODE_EXTRA_CA_CERTS="/abs/path/saw-workspace/certs/zscaler-root.pem" \
+        copilot --server --port 4321
+    - pattern: "subshell_scoped_exports"
+      description: "Use a subshell to export vars without affecting sibling processes."
+      example: |
+        (
+          export SAW_COPILOT_CA_PEM="/abs/path/saw-workspace/certs/zscaler-root.pem"
+          export NODE_EXTRA_CA_CERTS="$SAW_COPILOT_CA_PEM"
+          export NODE_OPTIONS="--use-system-ca"   # only if required
+          copilot --server --port 4321
+        )
+  forbidden_patterns:
+    - pattern: "global_export_node_options"
+      description: "Never do this in scripts that also start Vite or any other node process."
+      example: |
+        export NODE_OPTIONS="--use-system-ca"  # ❌ breaks node tooling: 'not allowed in NODE_OPTIONS'
+    - pattern: "global_export_keychain_bundle"
+      description: "Avoid full keychain PEM export as a default CA bundle."
+      example: |
+        export NODE_EXTRA_CA_CERTS="$PWD/saw-workspace/certs/macos-keychain.pem"  # ❌ too broad
+
+agent_verification_tasks:
+  intent: "Check repository scripts to confirm env scoping is implemented correctly."
+  steps:
+    - id: "find_node_options_exports"
+      action: "search"
+      targets:
+        - "scripts/**"
+        - "services/**"
+        - "*.sh"
+        - "*.zsh"
+        - "*.bash"
+      query_regex: 'export\s+NODE_OPTIONS='
+      expected:
+        - "no_matches_or_only_within_subshell_scope"
+    - id: "find_node_extra_ca_certs_exports"
+      action: "search"
+      targets:
+        - "scripts/**"
+        - "services/**"
+        - "*.sh"
+      query_regex: 'export\s+NODE_EXTRA_CA_CERTS='
+      expected:
+        - "matches_allowed_only_if_scoped_to_copilot"
+    - id: "find_copilot_invocations"
+      action: "search"
+      targets:
+        - "scripts/**"
+        - "services/**"
+      query_regex: '\bcopilot\b.*(--server| -p | -i )'
+      expected:
+        - "copilot_is_started_with_inline_env_or_subshell_scoped_env"
+    - id: "verify_ca_pem_path_is_absolute"
+      action: "inspect"
+      file_candidates:
+        - "scripts/dev_all.sh"
+        - "scripts/run_mvp.sh"
+        - "services/saw_copilotd/**"
+      rule:
+        - "SAW_COPILOT_CA_PEM and NODE_EXTRA_CA_CERTS must be absolute paths when running from orchestrators or IDE tasks."
+    - id: "confirm_frontend_not_inheriting_node_options"
+      action: "inspect"
+      file_candidates:
+        - "scripts/dev_all.sh"
+        - "package.json"
+      rule:
+        - "vite start command must not be preceded by global NODE_OPTIONS export"
+        - "no wrapper sets NODE_OPTIONS globally"
+
+minimal_ca_export_guidance:
+  goal: "Generate a minimal PEM containing only corporate CA(s)."
+  macos_cli_methods:
+    - method: "keychain_access_gui"
+      steps:
+        - "Keychain Access -> search 'Zscaler' -> export root certificate (public) -> convert to PEM"
+    - method: "security_cli"
+      steps:
+        - 'security find-certificate -a -p -c "Zscaler" /Library/Keychains/System.keychain > saw-workspace/certs/zscaler-root.pem'
+  validation:
+    - command: 'openssl x509 -in saw-workspace/certs/zscaler-root.pem -noout -subject -issuer'
+    - expectation: "subject/issuer indicates Zscaler (or org CA) and no private key material exists"
+
+runtime_smoke_tests:
+  copilot_cli_prompt:
+    - command: |
+        SAW_COPILOT_CA_PEM="/abs/path/saw-workspace/certs/zscaler-root.pem" \
+        NODE_EXTRA_CA_CERTS="/abs/path/saw-workspace/certs/zscaler-root.pem" \
+        copilot -p "hello" --model gpt-5.2 --silent
+      expected_contains:
+        - "I’m the GitHub Copilot CLI"
+  copilot_cli_server:
+    - command: |
+        SAW_COPILOT_CA_PEM="/abs/path/saw-workspace/certs/zscaler-root.pem" \
+        NODE_EXTRA_CA_CERTS="/abs/path/saw-workspace/certs/zscaler-root.pem" \
+        copilot --server --port 4321
+      expected_behavior:
+        - "process stays running"
+        - "no TLS/model list AggregateError"
+  saw_dev_all:
+    - command: "scripts/dev_all.sh"
+      expected_behavior:
+        - "saw_api starts"
+        - "patch_engine starts"
+        - "vite starts"
+        - "no 'node: --use-system-ca is not allowed in NODE_OPTIONS'"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextvars
+from datetime import datetime
 import json
 import os
 import subprocess
@@ -9,6 +10,8 @@ import uuid
 from functools import lru_cache
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -102,10 +105,18 @@ _REQ_ID: contextvars.ContextVar[str] = contextvars.ContextVar("saw_req_id", defa
 
 SAW_PATCH_ENGINE_USE_STASH = _truthy(os.environ.get("SAW_PATCH_ENGINE_USE_STASH", "0"))
 
+_PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def _ts_pacific(ms: int) -> str:
+    # ISO-8601 with numeric offset, in America/Los_Angeles (PST/PDT).
+    return datetime.fromtimestamp(ms / 1000.0, tz=_PACIFIC_TZ).isoformat(timespec="seconds")
+
 def _dbg(hypothesisId: str, location: str, message: str, data: dict[str, Any] | None = None) -> None:
     # Keep tiny + never log secrets.
     try:
         os.makedirs(SAW_DIR, exist_ok=True)
+        ts = int(time.time() * 1000)
         payload = {
             "sessionId": "debug-session",
             "runId": "pre-fix",
@@ -113,7 +124,8 @@ def _dbg(hypothesisId: str, location: str, message: str, data: dict[str, Any] | 
             "location": location,
             "message": message,
             "data": data or {},
-            "timestamp": int(time.time() * 1000),
+            "timestamp": ts,
+            "timestamp_pacific": _ts_pacific(ts),
         }
         with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -194,7 +206,8 @@ def _ensure_saw_dir() -> None:
 def append_session(event: dict[str, Any]) -> None:
     try:
         _ensure_saw_dir()
-        line = json.dumps({"ts": int(time.time() * 1000), **(event or {})}, ensure_ascii=False) + "\n"
+        ts = int(time.time() * 1000)
+        line = json.dumps({"ts": ts, "ts_pacific": _ts_pacific(ts), **(event or {})}, ensure_ascii=False) + "\n"
         with open(SESSION_LOG, "a", encoding="utf-8") as f:
             f.write(line)
     except Exception:

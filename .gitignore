@@ -29,3 +29,8 @@ __pycache__/
 
 # Cursor local logs (avoid dirty git state during patch/apply)
 .cursor/debug.log
+
+macos-keychain.pem
+
+# Copilot TLS bundles (generated locally)
+saw-workspace/certs/*.pem

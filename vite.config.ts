@@ -193,7 +193,20 @@ export default defineConfig(({ mode }) => {
   async function appendSession(event: any) {
     try {
       await fs.mkdir(SAW_DIR, { recursive: true })
-      const line = JSON.stringify({ ts: Date.now(), ...event }) + '\n'
+      const ts = Date.now()
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Los_Angeles',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(new Date(ts))
+      const get = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+      const tsPacific = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')} America/Los_Angeles`
+      const line = JSON.stringify({ ts, ts_pacific: tsPacific, ...event }) + '\n'
       await fs.appendFile(SESSION_LOG, line, 'utf8')
     } catch {
       // ignore
