@@ -1,10 +1,39 @@
 import type { SawState } from '../storeTypes'
-import { approveAgentTool, requestAgentChat, requestAgentChatStream, type AgentSseEvent } from '../../ai/client'
+import {
+  approveAgentTool,
+  requestAgentChat,
+  requestAgentChatStream,
+  type AgentProvider,
+  type AgentSseEvent,
+} from '../../ai/client'
+
+const LS_PROVIDER_KEY = 'saw.agentProvider'
+
+function loadProvider(): AgentProvider {
+  try {
+    const v = (typeof window === 'undefined' ? null : window.localStorage.getItem(LS_PROVIDER_KEY)) || ''
+    const s = v.trim().toLowerCase()
+    if (s === 'openai' || s === 'copilot') return s
+  } catch {
+    // ignore
+  }
+  return 'copilot'
+}
+
+function saveProvider(p: AgentProvider) {
+  try {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(LS_PROVIDER_KEY, p)
+  } catch {
+    // ignore
+  }
+}
 
 export function createChatSlice(
   set: (partial: Partial<SawState> | ((s: SawState) => Partial<SawState>), replace?: boolean) => void,
   get: () => SawState,
-): Pick<SawState, 'chatBusy' | 'chat' | 'sendChat' | 'approvePendingTool' | 'clearChat'> {
+): Pick<SawState, 'chatBusy' | 'chat' | 'sendChat' | 'setChatProvider' | 'approvePendingTool' | 'clearChat'> {
+  const desiredProvider = loadProvider()
   return {
     chatBusy: false,
     chat: {
@@ -17,6 +46,13 @@ export function createChatSlice(
       conversationId: null,
       pendingTool: null,
       streamMode: 'json',
+      provider: null,
+      desiredProvider,
+    },
+
+    setChatProvider: (provider: AgentProvider) => {
+      saveProvider(provider)
+      set((s) => ({ chat: { ...s.chat, desiredProvider: provider } }))
     },
 
     clearChat: () => {
@@ -31,6 +67,8 @@ export function createChatSlice(
           conversationId: null,
           pendingTool: null,
           streamMode: 'json',
+          provider: null,
+          desiredProvider: s.chat.desiredProvider ?? loadProvider(),
         },
         logs: [...s.logs, '[chat] cleared'],
       }))
@@ -60,6 +98,12 @@ export function createChatSlice(
         const cid = ev.conversation_id
         if (cid) {
           set((s) => ({ chat: { ...s.chat, conversationId: cid, streamMode: 'sse' as const } }))
+        }
+
+        if (t === 'session.started') {
+          const provider = String(ev.payload?.provider ?? '').trim()
+          if (provider) set((s) => ({ chat: { ...s.chat, provider } }))
+          return
         }
 
         if (t === 'assistant.message_delta') {
@@ -125,15 +169,16 @@ export function createChatSlice(
 
       try {
         const state = get()
+        const provider = state.chat.desiredProvider
         // Prefer SSE (works for Copilot mode; OpenAI mode returns a one-shot SSE too).
-        await requestAgentChatStream(state.chat.conversationId, content, applyEvent)
+        await requestAgentChatStream(state.chat.conversationId, content, provider, applyEvent)
 
         // If the stream didn't deliver anything, fall back to JSON.
         const after = get()
         const lastAssistant = after.chat.messages[assistantIndex]
         const empty = !lastAssistant || String((lastAssistant as any).content ?? '').trim().length === 0
         if (empty) {
-          const r = await requestAgentChat(after.chat.conversationId, content)
+          const r = await requestAgentChat(after.chat.conversationId, content, after.chat.desiredProvider)
           const status = (r as any).status
           const cid = (r as any).conversation_id ?? after.chat.conversationId
           const pending = status === 'needs_approval' ? ((r as any).tool_call ?? null) : null
@@ -188,7 +233,7 @@ export function createChatSlice(
       const streaming = state.chat.streamMode === 'sse'
       set({ chatBusy: true })
       try {
-        const r = await approveAgentTool(cid, pending.id, Boolean(approved))
+        const r = await approveAgentTool(cid, pending.id, Boolean(approved), state.chat.desiredProvider)
         if (streaming) {
           // Stream will continue and deliver the next assistant message.
           set((s) => ({ chatBusy: true, chat: { ...s.chat, pendingTool: null } }))

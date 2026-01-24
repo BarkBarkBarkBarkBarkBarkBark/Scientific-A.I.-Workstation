@@ -328,6 +328,60 @@ class CopilotAgentManager:
         asyncio.create_task(run_send())
         return conv, q
 
+    async def chat_once(self, *, conversation_id: Optional[str], message: str, timeout_s: float = 120.0) -> dict[str, Any]:
+        """Run a single Copilot turn and return a legacy JSON response.
+
+        This enables switching providers without requiring SSE in callers.
+        """
+
+        conv, q = await self.stream_chat(conversation_id=conversation_id, message=message)
+        content: str = ""
+        while True:
+            ev = await asyncio.wait_for(q.get(), timeout=timeout_s)
+            t = str(ev.get("type") or "")
+            payload = ev.get("payload") or {}
+
+            if t == "assistant.message_delta":
+                delta = str((payload or {}).get("delta") or "")
+                if delta:
+                    content += delta
+                continue
+
+            if t == "assistant.message":
+                content = str((payload or {}).get("content") or "")
+                continue
+
+            if t == "permission.request":
+                details = (payload or {}).get("details") or {}
+                tool_call_id = str((payload or {}).get("toolCallId") or details.get("id") or "")
+                name = str(details.get("name") or "tool")
+                args = (
+                    details.get("arguments")
+                    or (details.get("details") or {}).get("arguments")
+                    or (details.get("function") or {}).get("arguments")
+                    or {}
+                )
+                return {
+                    "status": "needs_approval",
+                    "conversation_id": conv.conversation_id,
+                    "tool_call": {"id": tool_call_id, "name": name, "arguments": args},
+                    "model": "copilot",
+                }
+
+            if t == "session.error":
+                msg = str((payload or {}).get("message") or "session_error")
+                return {
+                    "status": "error",
+                    "conversation_id": conv.conversation_id,
+                    "error": msg,
+                    "model": "copilot",
+                }
+
+            if t == "session.idle":
+                break
+
+        return {"status": "ok", "conversation_id": conv.conversation_id, "message": content, "model": "copilot"}
+
 
 _MANAGER: Optional[CopilotAgentManager] = None
 

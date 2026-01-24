@@ -6,11 +6,18 @@ Scientific AI Workstation
             <plugin_name>
                 <plugin_data>
         machine-context
-              
+            context.json
         machine-specs
+            specs.yaml
         plugins
+            plugin_folder
+                wrapper.py
+                plugin.yaml
+                ui
+                    ui.bundle.js
         sources
-        .gitkeep
+            imported_data_source
+                package contents
         todo.md
     scripts
         dev_all_linux.sh
@@ -19,8 +26,45 @@ Scientific AI Workstation
         linux_init.sh
     services
         db
+            extensions.sql
+            roles.sqk
         patch_engine
+            app
+                 __init__.py
+                 main.py
         saw_api
+            app
+                agent_runtime
+                    copilot_agent.py
+                    core.py
+                    path_engine_client.py
+                    prompt.py
+                    state.py
+                    tools.py
+                ageng_log.py
+                agent.py
+                bootstrap.py
+                db.py
+                embeddings.py
+                env_manager.py
+                main.py
+                migrations.py
+                plugin_probe.py
+                plugin_runner.py
+                plugins_runtime.py
+                run_manager.py
+                service_manager.py
+                settings.py
+                stock_plugins_catalog.py
+            migrations
+               init.sql
+               runs_services.sql 
+            tests
+                test_env_hashing.py
+                test_port_allocation.py
+
+###################################################################
+
     src
         agent
         ai

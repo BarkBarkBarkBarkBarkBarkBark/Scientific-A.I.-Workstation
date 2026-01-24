@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
 import { parsePatchProposalFromAssistant } from '../patching/parsePatchProposal'
 
@@ -49,11 +49,17 @@ function extractCommitMessage(text: string): string | null {
 export function ChatPanel() {
   const [text, setText] = useState('')
   const [patchMode, setPatchMode] = useState(false)
+  const [openaiEnabled, setOpenaiEnabled] = useState<boolean | null>(null)
+
   const messages = useSawStore((s) => s.chat.messages)
   const pendingTool = useSawStore((s) => s.chat.pendingTool)
   const approvePendingTool = useSawStore((s) => s.approvePendingTool)
   const busy = useSawStore((s) => s.chatBusy)
   const sendChat = useSawStore((s) => s.sendChat)
+  const provider = useSawStore((s) => s.chat.provider ?? null)
+  const desiredProvider = useSawStore((s) => s.chat.desiredProvider ?? 'copilot')
+  const setChatProvider = useSawStore((s) => s.setChatProvider)
+  const streamMode = useSawStore((s) => s.chat.streamMode ?? 'json')
   const attached = useSawStore((s) => s.dev.attachedPaths)
   const devClearAttachments = useSawStore((s) => s.devClearAttachments)
   const applyPatch = useSawStore((s) => s.applyPatch)
@@ -67,9 +73,81 @@ export function ChatPanel() {
     return messages.filter((m) => m.role !== 'system')
   }, [messages])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const r = await fetch('/api/saw/health')
+        if (!r.ok) throw new Error(await r.text())
+        const j = (await r.json()) as any
+        if (!cancelled) setOpenaiEnabled(Boolean(j?.openai_enabled))
+      } catch {
+        if (!cancelled) setOpenaiEnabled(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-auto p-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/30 px-2 py-1 text-[11px] text-zinc-400">
+          <div>
+            agent: <span className="font-mono text-zinc-200">{provider || 'unknown'}</span>
+            <span className="text-zinc-700">/</span>
+            selected: <span className="font-mono text-zinc-200">{desiredProvider}</span>
+          </div>
+          <div className="text-zinc-700">•</div>
+          <div className="flex items-center gap-1">
+            use:
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setChatProvider('copilot')}
+              className={[
+                'rounded border px-2 py-1 text-[11px] font-semibold disabled:opacity-50',
+                desiredProvider === 'copilot'
+                  ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
+                  : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+              ].join(' ')}
+              title="Route the next chat request to Copilot"
+            >
+              Copilot
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setChatProvider('openai')}
+              className={[
+                'rounded border px-2 py-1 text-[11px] font-semibold disabled:opacity-50',
+                desiredProvider === 'openai'
+                  ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
+                  : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+              ].join(' ')}
+              title="Route the next chat request to OpenAI"
+            >
+              OpenAI
+            </button>
+          </div>
+          <div className="text-zinc-700">•</div>
+          <div>
+            stream: <span className="font-mono text-zinc-200">{streamMode}</span>
+          </div>
+          <div className="text-zinc-700">•</div>
+          <div>
+            openai key:{' '}
+            {openaiEnabled === null ? (
+              <span className="font-mono text-zinc-500">unknown</span>
+            ) : openaiEnabled ? (
+              <span className="font-mono text-emerald-400">configured</span>
+            ) : (
+              <span className="font-mono text-zinc-500">missing</span>
+            )}
+          </div>
+        </div>
+
         {lastForbidden?.path && (
           <div className="mb-3 rounded-md border border-amber-900/40 bg-amber-950/20 p-2 text-[11px] text-amber-100">
             <div className="flex items-center justify-between gap-2">

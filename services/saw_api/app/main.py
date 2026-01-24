@@ -25,7 +25,21 @@ from .settings import get_settings
 from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
 from .agent import agent_chat, agent_approve
-from .agent_runtime.copilot_agent import copilot_enabled, copilot_manager
+
+try:
+    from .agent_runtime.copilot_agent import copilot_enabled, copilot_manager
+
+    _COPILOT_AVAILABLE = True
+except Exception:
+    # Copilot is optional; allow SAW API to boot and run the OpenAI agent even
+    # if the Copilot SDK is not installed or fails to import.
+    _COPILOT_AVAILABLE = False
+
+    def copilot_enabled() -> bool:  # type: ignore
+        return False
+
+    def copilot_manager() -> Any:  # type: ignore
+        raise RuntimeError("copilot_unavailable")
 from .agent_log import agent_log_path
 from . import env_manager
 from .stock_plugins_catalog import (
@@ -102,9 +116,19 @@ class AgentApproveRequest(BaseModel):
 
 
 @app.post("/agent/chat")
-async def agent_chat_post(req: AgentChatRequest, stream: bool = Query(False)) -> Any:
-    # Legacy JSON mode (existing frontend usage)
+async def agent_chat_post(req: AgentChatRequest, stream: bool = Query(False), provider: str | None = Query(None)) -> Any:
+    provider_norm = (provider or "").strip().lower()
+    if provider_norm not in ("copilot", "openai"):
+        provider_norm = ""
+
+    use_copilot = provider_norm == "copilot" or (not provider_norm and copilot_enabled())
+
+    # JSON mode
     if not stream:
+        if use_copilot:
+            if not _COPILOT_AVAILABLE:
+                return {"status": "error", "conversation_id": req.conversation_id, "error": "copilot_unavailable"}
+            return await copilot_manager().chat_once(conversation_id=req.conversation_id, message=req.message)
         return agent_chat(conversation_id=req.conversation_id, message=req.message)
 
     # Streaming SSE mode (required for Copilot tool approval gating)
@@ -123,8 +147,17 @@ async def agent_chat_post(req: AgentChatRequest, stream: bool = Query(False)) ->
         yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'assistant.message', 'payload': {'content': msg}})}\n\n"
         yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.idle', 'payload': {}})}\n\n"
 
-    if not copilot_enabled():
+    if not use_copilot:
         return StreamingResponse(gen_openai_once(), media_type="text/event-stream")
+
+    if not _COPILOT_AVAILABLE:
+        async def gen_unavailable() -> Any:
+            cid = (req.conversation_id or "")
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.started', 'payload': {'provider': 'copilot'}})}\n\n"
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.error', 'payload': {'message': 'copilot_unavailable'}})}\n\n"
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.idle', 'payload': {}})}\n\n"
+
+        return StreamingResponse(gen_unavailable(), media_type="text/event-stream")
 
     mgr = copilot_manager()
     try:
@@ -153,9 +186,15 @@ async def agent_chat_post(req: AgentChatRequest, stream: bool = Query(False)) ->
 
 
 @app.post("/agent/approve")
-def agent_approve_post(req: AgentApproveRequest) -> dict[str, Any]:
-    # If Copilot mode is enabled, first try to resolve a pending Copilot-gated tool call.
-    if copilot_enabled():
+def agent_approve_post(req: AgentApproveRequest, provider: str | None = Query(None)) -> dict[str, Any]:
+    provider_norm = (provider or "").strip().lower()
+    if provider_norm not in ("copilot", "openai"):
+        provider_norm = ""
+
+    use_copilot = provider_norm == "copilot" or (not provider_norm and copilot_enabled())
+
+    # If Copilot is selected, first try to resolve a pending Copilot-gated tool call.
+    if use_copilot and _COPILOT_AVAILABLE:
         ok = copilot_manager().approve(req.conversation_id, req.tool_call_id, bool(req.approved))
         if ok:
             return {"status": "ok", "conversation_id": req.conversation_id, "message": "ack", "model": "copilot"}

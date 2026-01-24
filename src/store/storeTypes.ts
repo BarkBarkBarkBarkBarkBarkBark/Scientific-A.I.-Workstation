@@ -59,6 +59,8 @@ export type SawState = {
     conversationId: string | null
     pendingTool: AgentToolCall | null
     streamMode?: 'sse' | 'json'
+    provider?: string | null
+    desiredProvider?: 'copilot' | 'openai'
   }
 
   // Dev / patch engine
@@ -102,6 +104,7 @@ export type SawState = {
   submitGoal: (goal: string) => Promise<void>
 
   sendChat: (text: string) => Promise<void>
+  setChatProvider: (provider: 'copilot' | 'openai') => void
   approvePendingTool: (approved: boolean) => Promise<void>
   clearChat: () => void
 

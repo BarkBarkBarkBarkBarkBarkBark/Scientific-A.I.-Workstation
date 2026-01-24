@@ -15,6 +15,8 @@ PATCH_ENGINE_URL="${SAW_PATCH_ENGINE_URL:-http://${PATCH_ENGINE_HOST}:${PATCH_EN
 SAW_ENABLE_DB="${SAW_ENABLE_DB:-1}"
 SAW_ENABLE_PLUGINS="${SAW_ENABLE_PLUGINS:-1}"
 SAW_PATCH_APPLY_ALLOWLIST="${SAW_PATCH_APPLY_ALLOWLIST:-.}"
+SAW_KILL_PORTS_ON_START="${SAW_KILL_PORTS_ON_START:-0}"
+SAW_PORT_CONFLICT="${SAW_PORT_CONFLICT:-fail}" # fail|kill|reuse
 
 usage() {
   cat <<EOF
@@ -35,6 +37,11 @@ Env (optional):
   SAW_ENABLE_DB=1
   SAW_ENABLE_PLUGINS=1
   SAW_PATCH_APPLY_ALLOWLIST="."  # dev-only
+  SAW_KILL_PORTS_ON_START=1       # kill listeners on frontend/api/patch ports before launching
+  SAW_PORT_CONFLICT=fail|kill|reuse
+    - fail:  exit with a helpful message if ports are in use
+    - kill:  kill processes listening on the port(s) before launching
+    - reuse: if /health responds on that port, reuse existing process; otherwise kill+launch
 EOF
 }
 
@@ -70,6 +77,58 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 echo "[dev_all] root: $ROOT_DIR"
+
+if ! command -v lsof >/dev/null 2>&1; then
+  echo "[dev_all] ERROR: lsof not found on PATH (required for port checks)." >&2
+  exit 127
+fi
+
+port_has_listener() {
+  local port="$1"
+  [[ -n "$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)" ]]
+}
+
+handle_port_conflict() {
+  local port="$1"
+  local label="$2"
+  local health_url="${3:-}"
+
+  if ! port_has_listener "$port"; then
+    return 0
+  fi
+
+  case "$SAW_PORT_CONFLICT" in
+    kill)
+      echo "[dev_all] port ${port} in use; killing listeners (SAW_PORT_CONFLICT=kill) ..."
+      bash "$ROOT_DIR/scripts/nuke_ports_mac.sh" "$port" || true
+      return 0
+      ;;
+    reuse)
+      if [[ -n "$health_url" ]] && curl -fsS "$health_url" >/dev/null 2>&1; then
+        echo "[dev_all] port ${port} in use; reusing existing ${label} (SAW_PORT_CONFLICT=reuse)"
+        return 2
+      fi
+      echo "[dev_all] port ${port} in use but ${label} not healthy; killing + relaunching (SAW_PORT_CONFLICT=reuse) ..."
+      bash "$ROOT_DIR/scripts/nuke_ports_mac.sh" "$port" || true
+      return 0
+      ;;
+    fail|*)
+      echo "[dev_all] ERROR: port ${port} already in use (${label})." >&2
+      echo "[dev_all] Tip: run: bash scripts/nuke_ports_mac.sh ${port}" >&2
+      echo "[dev_all] Tip: or set SAW_PORT_CONFLICT=kill (or SAW_KILL_PORTS_ON_START=1)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+if [[ "$SAW_KILL_PORTS_ON_START" == "1" ]]; then
+  if [[ -f "$ROOT_DIR/scripts/nuke_ports_mac.sh" ]]; then
+    echo "[dev_all] clearing stale dev ports (SAW_KILL_PORTS_ON_START=1) ..."
+    bash "$ROOT_DIR/scripts/nuke_ports_mac.sh" "$API_PORT" "$PATCH_ENGINE_PORT" "$FRONTEND_PORT" || true
+  else
+    echo "[dev_all] WARN: scripts/nuke_ports_mac.sh not found; skipping port cleanup" >&2
+  fi
+fi
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "[dev_all] ERROR: uv not found on PATH." >&2
@@ -123,8 +182,14 @@ export SAW_PATCH_APPLY_ALLOWLIST
 
 echo "[dev_all] starting SAW API on ${API_HOST}:${API_PORT} ..."
 # IMPORTANT: keep reload scope narrow so patches don't restart the API mid-flight.
-"$VENV_PY" -m uvicorn services.saw_api.app.main:app --host "$API_HOST" --port "$API_PORT" --reload --reload-dir "services/saw_api" &
-API_PID=$!
+handle_port_conflict "$API_PORT" "SAW API" "http://${API_HOST}:${API_PORT}/health"
+API_CONFLICT_RC=$?
+if [[ "$API_CONFLICT_RC" -eq 2 ]]; then
+  API_PID=""
+else
+  "$VENV_PY" -m uvicorn services.saw_api.app.main:app --host "$API_HOST" --port "$API_PORT" --reload --reload-dir "services/saw_api" &
+  API_PID=$!
+fi
 
 echo "[dev_all] waiting for SAW API /health ..."
 for _ in $(seq 1 40); do
@@ -137,8 +202,14 @@ done
 
 echo "[dev_all] starting Patch Engine on ${PATCH_ENGINE_HOST}:${PATCH_ENGINE_PORT} ..."
 # IMPORTANT: keep reload scope narrow so patch ops don't restart patch_engine mid-flight.
-"$VENV_PY" -m uvicorn services.patch_engine.app.main:app --host "$PATCH_ENGINE_HOST" --port "$PATCH_ENGINE_PORT" --reload --reload-dir "services/patch_engine" &
-PATCH_ENGINE_PID=$!
+handle_port_conflict "$PATCH_ENGINE_PORT" "Patch Engine" "http://${PATCH_ENGINE_HOST}:${PATCH_ENGINE_PORT}/health"
+PATCH_CONFLICT_RC=$?
+if [[ "$PATCH_CONFLICT_RC" -eq 2 ]]; then
+  PATCH_ENGINE_PID=""
+else
+  "$VENV_PY" -m uvicorn services.patch_engine.app.main:app --host "$PATCH_ENGINE_HOST" --port "$PATCH_ENGINE_PORT" --reload --reload-dir "services/patch_engine" &
+  PATCH_ENGINE_PID=$!
+fi
 
 echo "[dev_all] waiting for Patch Engine /health ..."
 for _ in $(seq 1 40); do
@@ -155,8 +226,15 @@ if [[ ! -d "node_modules" ]]; then
 fi
 
 echo "[dev_all] starting frontend (vite) on port ${FRONTEND_PORT} ..."
-npm run dev -- --port "$FRONTEND_PORT" --strictPort &
-VITE_PID=$!
+handle_port_conflict "$FRONTEND_PORT" "Vite dev server" ""
+VITE_CONFLICT_RC=$?
+if [[ "$VITE_CONFLICT_RC" -eq 2 ]]; then
+  echo "[dev_all] reusing existing Vite dev server (port ${FRONTEND_PORT})"
+  VITE_PID=""
+else
+  npm run dev -- --port "$FRONTEND_PORT" --strictPort &
+  VITE_PID=$!
+fi
 
 echo "[dev_all] running:"
 echo "  - SAW API:   http://${API_HOST}:${API_PORT}"

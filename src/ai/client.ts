@@ -46,8 +46,15 @@ export type AgentSseEvent = {
   payload: any
 }
 
-export async function requestAgentChat(conversationId: string | null, message: string): Promise<AgentChatResponse> {
-  const r = await fetch('/api/saw/agent/chat', {
+export type AgentProvider = 'copilot' | 'openai'
+
+export async function requestAgentChat(
+  conversationId: string | null,
+  message: string,
+  provider?: AgentProvider,
+): Promise<AgentChatResponse> {
+  const url = provider ? `/api/saw/agent/chat?provider=${encodeURIComponent(provider)}` : '/api/saw/agent/chat'
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversation_id: conversationId, message }),
@@ -63,8 +70,10 @@ export async function approveAgentTool(
   conversationId: string,
   toolCallId: string,
   approved: boolean,
+  provider?: AgentProvider,
 ): Promise<AgentChatResponse> {
-  const r = await fetch('/api/saw/agent/approve', {
+  const url = provider ? `/api/saw/agent/approve?provider=${encodeURIComponent(provider)}` : '/api/saw/agent/approve'
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversation_id: conversationId, tool_call_id: toolCallId, approved }),
@@ -103,9 +112,13 @@ function parseSseBlocks(text: string): Array<{ event?: string; data?: string }> 
 export async function requestAgentChatStream(
   conversationId: string | null,
   message: string,
+  provider: AgentProvider | undefined,
   onEvent: (ev: AgentSseEvent) => void,
 ): Promise<void> {
-  const r = await fetch('/api/saw/agent/chat?stream=1', {
+  const url = provider
+    ? `/api/saw/agent/chat?stream=1&provider=${encodeURIComponent(provider)}`
+    : '/api/saw/agent/chat?stream=1'
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversation_id: conversationId, message }),
