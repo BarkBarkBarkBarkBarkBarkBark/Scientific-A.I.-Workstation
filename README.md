@@ -53,6 +53,7 @@ In practice this means:
 - Node.js (recommended: current LTS)
 - Python 3.11+ (for the SAW API)
 - Docker (for Postgres + pgvector if you enable DB features)
+- (Optional, for Copilot provider) GitHub Copilot CLI (`copilot`) authenticated on this machine
 
 If you don’t need the DB, you can still run the frontend + API without Docker.
 
@@ -87,6 +88,12 @@ Starts: Postgres (pgvector) + SAW API + frontend.
 ```bash
 ./scripts/dev_all_mac.sh --frontend-port 7176 --api-port 5127
 ```
+
+Notes:
+- The runner starts a Copilot CLI server automatically (TCP server mode) on a free port
+  (default range `4321..4360`) and points the SAW API at it via `SAW_COPILOT_CLI_URL`.
+  This avoids Copilot server restarts and port conflicts during `uvicorn --reload`.
+- Copilot TLS settings are scoped to the Copilot CLI process (so Vite/Node isn’t affected).
 
 Then open: `http://127.0.0.1:7176/`
 
@@ -248,21 +255,25 @@ See `ENV_SETUP.md`.
 
 - **Copilot provider “stalls” / no response (TLS issuer certificate)**
   - Symptom: the chat shows “Thinking…” and the API SSE stream only emits `session.started` + keepalives.
+    Another common symptom is an SSE `session.error` like “Failed to list models”.
+  - Quick sanity check:
+    - `curl -fsS http://127.0.0.1:5127/health | python3 -m json.tool` and confirm `copilot_available: true` and `copilot_ok: true`.
+    - Or run the smoke test: `./.venv/bin/python scripts/test_saw_copilot_sse.py "hello" --provider copilot --api http://127.0.0.1:5127`
   - Check Copilot CLI logs:
     ```bash
     bash scripts/copilot_cli_diag.sh
     ```
   - If you see: `unable to get issuer certificate`, it’s a TLS trust issue (often corporate SSL interception).
-    SAW defaults to starting Copilot with `NODE_OPTIONS=--use-system-ca`, but some environments still need an explicit CA bundle.
+    SAW defaults to starting Copilot with `--use-system-ca`, but some environments still need an explicit CA bundle.
   - Generate a PEM bundle from macOS keychains:
     ```bash
     bash scripts/export_macos_keychain_certs_pem.sh
     ```
-  - Export it for SAW before starting the services:
+  - Export it for SAW before starting the services (or let the runner auto-detect it under `saw-workspace/certs/`):
     ```bash
     export SAW_COPILOT_EXTRA_CA_CERTS="$PWD/saw-workspace/certs/macos-keychain.pem"
     ```
-  - Restart the SAW API (and therefore the Copilot CLI subprocess).
+  - Restart the dev stack (this also restarts the managed Copilot CLI server).
     If you’re using the one-command runner:
     ```bash
     ./scripts/dev_all_mac.sh --frontend-port 7176 --api-port 5127

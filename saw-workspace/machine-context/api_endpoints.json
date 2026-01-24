@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "generated_from": {
+    "saw_api": "services/saw_api/app/main.py",
+    "patch_engine": "services/patch_engine/app/main.py",
+    "vite_dev_server": "vite.config.ts"
+  },
+  "service_defaults": {
+    "frontend_vite": { "default_port": 5173 },
+    "saw_api": { "default_url": "http://127.0.0.1:5127" },
+    "patch_engine": { "default_url": "http://127.0.0.1:5128" },
+    "copilot_cli": { "env": "SAW_COPILOT_CLI_URL" }
+  },
+  "vite_proxies": [
+    {
+      "prefix": "/api/saw",
+      "target_env": "SAW_API_URL",
+      "default_target": "http://127.0.0.1:5127",
+      "rewrite": "strip_prefix:/api/saw"
+    },
+    {
+      "prefix": "/api/dev",
+      "target_env": "SAW_PATCH_ENGINE_URL",
+      "default_target": "http://127.0.0.1:5128",
+      "rewrite": "none"
+    }
+  ],
+  "services": [
+    {
+      "id": "saw_api",
+      "base_url_env": "SAW_API_URL",
+      "default_base_url": "http://127.0.0.1:5127",
+      "browser_base": "/api/saw",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/health",
+          "browser_path": "/api/saw/health",
+          "description": "Overall health (db_ok/db_error, openai_enabled, copilot_available/copilot_ok + copilot detail)."
+        },
+        {
+          "method": "POST",
+          "path": "/agent/chat",
+          "browser_path": "/api/saw/agent/chat",
+          "query": {
+            "stream": { "type": "boolean", "default": false },
+            "provider": { "type": "string", "enum": ["copilot", "openai"], "optional": true }
+          },
+          "description": "Chat endpoint. stream=false returns JSON; stream=true returns SSE event stream (event: saw.agent.event)."
+        },
+        {
+          "method": "POST",
+          "path": "/agent/approve",
+          "browser_path": "/api/saw/agent/approve",
+          "query": {
+            "provider": { "type": "string", "enum": ["copilot", "openai"], "optional": true }
+          },
+          "body": {
+            "conversation_id": "string",
+            "tool_call_id": "string",
+            "approved": "boolean"
+          },
+          "description": "Approve/deny a tool call; used by UI gating."
+        },
+        {
+          "method": "GET",
+          "path": "/agent/log",
+          "browser_path": "/api/saw/agent/log",
+          "query": { "tail": { "type": "integer", "min": 10, "max": 5000, "default": 200 } },
+          "description": "Dev-only agent ndjson tail."
+        },
+        {
+          "method": "POST",
+          "path": "/db/migrate",
+          "browser_path": "/api/saw/db/migrate",
+          "description": "Apply DB migrations."
+        },
+        {
+          "method": "POST",
+          "path": "/db/init",
+          "browser_path": "/api/saw/db/init",
+          "description": "Migrate + seed instance row if missing."
+        },
+        {
+          "method": "POST",
+          "path": "/ingest/index",
+          "browser_path": "/api/saw/ingest/index",
+          "description": "Upsert a document by uri into saw_ingest.document.",
+          "body": {
+            "uri": "string",
+            "doc_type": "string",
+            "content_text": "string",
+            "metadata_json": "object"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/embed/upsert",
+          "browser_path": "/api/saw/embed/upsert",
+          "description": "Chunk + embed content; upsert docs and missing embeddings.",
+          "body": {
+            "uri": "string",
+            "doc_type": "string",
+            "content_text": "string",
+            "metadata_json": "object",
+            "model": "string?",
+            "chunk_max_chars": "integer",
+            "chunk_overlap_chars": "integer"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/search/vector",
+          "browser_path": "/api/saw/search/vector",
+          "description": "Vector search using pgvector embeddings.",
+          "body": { "query": "string", "top_k": "integer", "model": "string?" }
+        },
+        {
+          "method": "POST",
+          "path": "/files/upload_audio_wav",
+          "browser_path": "/api/saw/files/upload_audio_wav",
+          "description": "Upload WAV file (multipart) into <workspace>/.saw/uploads and return relative path."
+        },
+        {
+          "method": "POST",
+          "path": "/audit/event",
+          "browser_path": "/api/saw/audit/event",
+          "description": "Insert an audit event (useful for DB write probe).",
+          "body": { "actor": "string", "event_type": "string", "details_json": "object" }
+        },
+        {
+          "method": "POST",
+          "path": "/patch/store_proposal",
+          "browser_path": "/api/saw/patch/store_proposal",
+          "description": "Store a unified diff proposal in DB.",
+          "body": {
+            "author": "string",
+            "diff_unified": "string",
+            "target_paths": "string[]",
+            "validation_status": "pending|passed|failed",
+            "validation_log": "string"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/patch/mark_applied",
+          "browser_path": "/api/saw/patch/mark_applied",
+          "description": "Mark patch proposal applied.",
+          "body": { "proposal_id": "string", "applied_commit": "string", "validation_status": "pending|passed|failed", "validation_log": "string" }
+        },
+        {
+          "method": "GET",
+          "path": "/plugins/list",
+          "browser_path": "/api/saw/plugins/list",
+          "description": "List available plugins (stock + workspace) with IO schemas and integrity for locked plugins."
+        },
+        {
+          "method": "GET",
+          "path": "/plugins/ui/schema/{plugin_id}",
+          "browser_path": "/api/saw/plugins/ui/schema/{plugin_id}",
+          "description": "Fetch plugin UI schema (YAML) for ui.mode=schema."
+        },
+        {
+          "method": "GET",
+          "path": "/plugins/ui/bundle/{plugin_id}",
+          "browser_path": "/api/saw/plugins/ui/bundle/{plugin_id}",
+          "description": "Fetch plugin UI JS bundle for ui.mode=bundle, subject to locked/sandbox policies."
+        },
+        {
+          "method": "POST",
+          "path": "/plugins/fork",
+          "browser_path": "/api/saw/plugins/fork",
+          "description": "Fork a stock plugin into a new workspace plugin id.",
+          "body": { "from_plugin_id": "string", "new_plugin_id": "string", "new_name": "string?" }
+        },
+        {
+          "method": "POST",
+          "path": "/plugins/create_from_python",
+          "browser_path": "/api/saw/plugins/create_from_python",
+          "description": "Create a new plugin folder from raw python code + template manifest; optional probe.",
+          "body": { "plugin_id": "string", "name": "string", "python_code": "string" }
+        },
+        {
+          "method": "POST",
+          "path": "/plugins/execute",
+          "browser_path": "/api/saw/plugins/execute",
+          "description": "Execute a plugin synchronously.",
+          "body": { "plugin_id": "string", "inputs": "object", "params": "object" }
+        },
+        {
+          "method": "POST",
+          "path": "/api/plugins/{plugin_id}/run",
+          "browser_path": "/api/saw/api/plugins/{plugin_id}/run",
+          "description": "Spawn an async run."
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{plugin_id}/{run_id}",
+          "browser_path": "/api/saw/api/runs/{plugin_id}/{run_id}",
+          "description": "Get run status + outputs."
+        },
+        {
+          "method": "POST",
+          "path": "/api/services/{service_id}/stop",
+          "browser_path": "/api/saw/api/services/{service_id}/stop",
+          "description": "Stop a spawned service."
+        }
+      ]
+    },
+    {
+      "id": "patch_engine",
+      "base_url_env": "SAW_PATCH_ENGINE_URL",
+      "default_base_url": "http://127.0.0.1:5128",
+      "browser_base": "/api/dev",
+      "notes": [
+        "Patch Engine health is at /health on the Patch Engine origin.",
+        "Vite proxy forwards /api/dev/* without rewrite; /api/dev/health will NOT hit Patch Engine /health unless you add a rewrite rule."
+      ],
+      "endpoints": [
+        { "method": "GET", "path": "/health", "description": "Patch Engine health (repo_root + allowlist)." },
+        { "method": "GET", "path": "/api/dev/flags", "browser_path": "/api/dev/flags", "description": "Feature flags." },
+        { "method": "GET", "path": "/api/dev/caps", "browser_path": "/api/dev/caps", "description": "Get caps manifest (.saw/caps.json)." },
+        { "method": "POST", "path": "/api/dev/caps", "browser_path": "/api/dev/caps", "description": "Set caps for a path." },
+        { "method": "GET", "path": "/api/dev/session/log", "browser_path": "/api/dev/session/log", "description": "Tail .saw/session.ndjson." },
+        { "method": "GET", "path": "/api/dev/tree", "browser_path": "/api/dev/tree", "description": "Directory tree (blocked paths filtered)." },
+        { "method": "GET", "path": "/api/dev/file", "browser_path": "/api/dev/file", "description": "Read file (caps enforced)." },
+        { "method": "POST", "path": "/api/dev/file", "browser_path": "/api/dev/file", "description": "Write file (caps enforced)." },
+        { "method": "POST", "path": "/api/dev/safe/write", "browser_path": "/api/dev/safe/write", "description": "Safe whole-file write (rollback on validation failure)." },
+        { "method": "POST", "path": "/api/dev/safe/delete", "browser_path": "/api/dev/safe/delete", "description": "Safe delete (rollback on validation failure)." },
+        { "method": "POST", "path": "/api/dev/safe/applyPatch", "browser_path": "/api/dev/safe/applyPatch", "description": "Safe apply unified diff (allowlist + caps + validation)." },
+        { "method": "GET", "path": "/api/dev/git/status", "browser_path": "/api/dev/git/status", "description": "Git status + diff (optionally path-scoped)." },
+        { "method": "POST", "path": "/api/dev/git/commit", "browser_path": "/api/dev/git/commit", "description": "Commit all changes with provided message." }
+      ]
+    },
+    {
+      "id": "vite_openai_proxy",
+      "base_url": "same-origin",
+      "endpoints": [
+        { "method": "GET", "path": "/api/ai/status", "description": "Whether OPENAI_API_KEY is present; returns enabled + model." },
+        { "method": "POST", "path": "/api/ai/plan", "description": "Dev-only planner endpoint (OpenAI)." },
+        { "method": "POST", "path": "/api/ai/chat", "description": "Dev-only chat endpoint (OpenAI)." }
+      ]
+    }
+  ],
+  "health_panel_checks": [
+    {
+      "id": "saw_api_health",
+      "type": "http",
+      "method": "GET",
+      "preferred_url": "/api/saw/health",
+      "success_fields": ["ok"],
+      "notes": ["Use db_ok + copilot_ok as green lights."]
+    },
+    {
+      "id": "patch_engine_health",
+      "type": "http",
+      "method": "GET",
+      "preferred_url": "${SAW_PATCH_ENGINE_URL}/health",
+      "notes": [
+        "If you need same-origin in the browser, add a Vite proxy rewrite for /api/dev/health -> /health."
+      ]
+    },
+    {
+      "id": "db_write_probe",
+      "type": "http",
+      "method": "POST",
+      "preferred_url": "/api/saw/audit/event",
+      "body_template": {
+        "actor": "health_panel",
+        "event_type": "health_probe",
+        "details_json": { "nonce": "${uuid}" }
+      },
+      "notes": [
+        "This validates DB write path. Read-after-write is not currently exposed via a GET endpoint."
+      ]
+    }
+  ]
+}
