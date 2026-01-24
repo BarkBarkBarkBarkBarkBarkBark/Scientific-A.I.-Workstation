@@ -10,6 +10,7 @@ export type WorkspacePluginListItem = {
   locked?: boolean
   origin?: 'stock' | 'dev'
   integrity?: { expected: string; actual: string; restored: boolean } | null
+  ui?: { mode?: 'schema' | 'bundle'; schema_file?: string; bundle_file?: string; sandbox?: boolean } | null
   inputs?: Array<{ id: string; name: string; type: string }>
   outputs?: Array<{ id: string; name: string; type: string }>
   parameters?: Array<{ id: string; label: string; kind: 'text' | 'number' | 'select'; default: any; options?: string[]; min?: number; max?: number }>
@@ -57,6 +58,15 @@ export async function fetchWorkspacePlugins(apiBase = 'http://127.0.0.1:5127'): 
       locked: Boolean(p.locked),
       origin: p.origin === 'stock' ? 'stock' : 'dev',
       integrity: p.integrity ?? null,
+      ui:
+        p.ui && (p.ui.mode === 'schema' || p.ui.mode === 'bundle')
+          ? {
+              mode: p.ui.mode,
+              schema_file: typeof p.ui.schema_file === 'string' ? p.ui.schema_file : undefined,
+              bundle_file: typeof p.ui.bundle_file === 'string' ? p.ui.bundle_file : undefined,
+              sandbox: typeof p.ui.sandbox === 'boolean' ? p.ui.sandbox : undefined,
+            }
+          : null,
       inputs: toPorts(p.inputs),
       outputs: toPorts(p.outputs),
       parameters: toParams(p.parameters),

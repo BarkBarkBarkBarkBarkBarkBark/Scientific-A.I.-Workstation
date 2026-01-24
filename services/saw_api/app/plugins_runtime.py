@@ -56,6 +56,17 @@ class ResourcesSpec(BaseModel):
     threads: int | None = None
 
 
+class PluginUiSpec(BaseModel):
+    # Runtime plugin UI configuration.
+    # - schema: server parses schema_file (YAML) and frontend renders built-in controls.
+    # - bundle: server serves bundle_file (prebuilt JS) and frontend executes it (workspace-only by default).
+    mode: Literal["schema", "bundle"] = "schema"
+    schema_file: str = "ui.yaml"
+    bundle_file: str = "ui/ui.bundle.js"
+    # When true, bundle mode is restricted to non-stock (workspace/dev) plugins.
+    sandbox: bool = True
+
+
 class PluginManifest(BaseModel):
     id: str
     name: str
@@ -72,6 +83,7 @@ class PluginManifest(BaseModel):
     execution: ExecutionSpec
     side_effects: SideEffectsSpec
     resources: ResourcesSpec
+    ui: PluginUiSpec | None = None
 
 
 @dataclass(frozen=True)

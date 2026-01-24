@@ -50,6 +50,12 @@ $startTime = Get-Date
 
 Write-Host "[dev_all] root: $RootDir" -ForegroundColor Cyan
 
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Host "[dev_all] ERROR: uv not found on PATH." -ForegroundColor Red
+    Write-Host "[dev_all] Install uv (PowerShell): irm https://astral.sh/uv/install.ps1 | iex" -ForegroundColor Red
+    exit 127
+}
+
 # Start Docker if available
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Host "[dev_all] starting postgres (docker compose up -d)..." -ForegroundColor Cyan
@@ -68,7 +74,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 # Create venv if needed
 if (-not (Test-Path ".venv")) {
     Write-Host "[dev_all] creating .venv..." -ForegroundColor Cyan
-    python -m venv .venv
+    uv venv .venv
 }
 
 # Activate venv
@@ -77,10 +83,10 @@ $venvActivate = Join-Path $RootDir ".venv\Scripts\Activate.ps1"
 
 # Install Python deps
 Write-Host "[dev_all] installing SAW API deps..." -ForegroundColor Cyan
-pip install -r services/saw_api/requirements.txt --quiet
+uv pip install -r services/saw_api/requirements.txt
 
 Write-Host "[dev_all] installing Patch Engine deps..." -ForegroundColor Cyan
-pip install -r services/patch_engine/requirements.txt --quiet
+uv pip install -r services/patch_engine/requirements.txt
 
 # Start SAW API
 Write-Host "[dev_all] starting SAW API on ${ApiHost}:${ApiPort} ..." -ForegroundColor Cyan

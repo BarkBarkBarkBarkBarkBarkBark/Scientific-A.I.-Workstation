@@ -1,0 +1,26 @@
+id: shopping.list.generator
+name: Shopping List Generator
+version: 0.1.0
+description: A plugin that generates shopping lists.
+category_path: utilities
+entrypoint:
+  file: wrapper.py
+  callable: main
+environment:
+  python: '>=3.11,<3.13'
+  pip: []
+inputs: {}
+params: {}
+outputs:
+  result:
+    type: object
+execution:
+  deterministic: true
+  cacheable: true
+side_effects:
+  network: none
+  disk: read_write
+  subprocess: forbidden
+resources:
+  gpu: forbidden
+  threads: 1

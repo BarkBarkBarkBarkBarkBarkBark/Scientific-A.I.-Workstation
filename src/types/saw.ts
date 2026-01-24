@@ -18,6 +18,13 @@ export type PluginParameterDefinition = {
   max?: number
 }
 
+export type PluginUiConfig = {
+  mode: 'schema' | 'bundle'
+  schema_file?: string
+  bundle_file?: string
+  sandbox?: boolean
+}
+
 export type PluginDefinition = {
   id: string
   name: string
@@ -39,6 +46,7 @@ export type PluginDefinition = {
   locked?: boolean
   origin?: 'stock' | 'dev'
   integrity?: { expected: string; actual: string; restored: boolean } | null
+  ui?: PluginUiConfig | null
   inputs: Port[]
   outputs: Port[]
   parameters: PluginParameterDefinition[]

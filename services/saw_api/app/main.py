@@ -9,6 +9,7 @@ import sys
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pgvector.psycopg import Vector
@@ -517,6 +518,7 @@ class PluginListItem(BaseModel):
     locked: bool = False
     origin: Literal["stock", "dev"] = "dev"
     integrity: dict[str, Any] | None = None
+    ui: dict[str, Any] | None = None
     inputs: list[dict[str, Any]] = Field(default_factory=list)
     outputs: list[dict[str, Any]] = Field(default_factory=list)
     parameters: list[dict[str, Any]] = Field(default_factory=list)
@@ -598,6 +600,7 @@ def plugins_list() -> PluginListResponse:
                     locked=locked,
                     origin=origin,
                     integrity=integrity,
+                    ui=(m.ui.model_dump() if getattr(m, "ui", None) is not None else None),
                     inputs=inputs,
                     outputs=outputs,
                     parameters=parameters,
@@ -606,6 +609,89 @@ def plugins_list() -> PluginListResponse:
         return PluginListResponse(ok=True, plugins=items)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"plugins_list_failed: {e}")
+
+
+def _safe_join_under_dir(root_dir: str, rel_path: str) -> str:
+    # Prevent traversal attacks; only allow files under plugin_dir.
+    root = os.path.abspath(root_dir)
+    rel = str(rel_path or "").lstrip("/\\")
+    full = os.path.abspath(os.path.join(root, rel))
+    if full == root or not full.startswith(root + os.sep):
+        raise HTTPException(status_code=400, detail="invalid_path")
+    return full
+
+
+@app.get("/plugins/ui/schema/{plugin_id}")
+def plugins_ui_schema(plugin_id: str) -> dict[str, Any]:
+    pid = (plugin_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="missing_plugin_id")
+
+    plugins = {p.manifest.id: p for p in discover_plugins(settings)}
+    plugin = plugins.get(pid)
+    if not plugin:
+        raise HTTPException(status_code=404, detail="unknown_plugin_id")
+
+    ui = getattr(plugin.manifest, "ui", None)
+    if ui is None:
+        raise HTTPException(status_code=404, detail="missing_ui_config")
+    if str(getattr(ui, "mode", "")) != "schema":
+        raise HTTPException(status_code=400, detail="ui_mode_not_schema")
+
+    schema_file = str(getattr(ui, "schema_file", "ui.yaml") or "ui.yaml")
+    schema_path = _safe_join_under_dir(plugin.plugin_dir, schema_file)
+    if not os.path.isfile(schema_path):
+        raise HTTPException(status_code=404, detail="schema_file_not_found")
+
+    try:
+        raw = yaml.safe_load(open(schema_path, "r", encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"schema_parse_failed: {e}")
+
+    # Ensure JSON-serializable shape (yaml returns dict/list/scalars).
+    return {"ok": True, "plugin_id": pid, "schema_file": schema_file, "schema": raw}
+
+
+@app.get("/plugins/ui/bundle/{plugin_id}")
+def plugins_ui_bundle(plugin_id: str) -> Response:
+    pid = (plugin_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="missing_plugin_id")
+
+    plugins = {p.manifest.id: p for p in discover_plugins(settings)}
+    plugin = plugins.get(pid)
+    if not plugin:
+        raise HTTPException(status_code=404, detail="unknown_plugin_id")
+
+    ui = getattr(plugin.manifest, "ui", None)
+    if ui is None:
+        raise HTTPException(status_code=404, detail="missing_ui_config")
+    if str(getattr(ui, "mode", "")) != "bundle":
+        raise HTTPException(status_code=400, detail="ui_mode_not_bundle")
+
+    stock = load_stock_catalog()
+    locked = bool(pid in stock)
+    sandbox = bool(getattr(ui, "sandbox", True))
+
+    # Policy:
+    # - For dev/workspace plugins: require sandbox=true.
+    # - For stock/locked plugins: allow bundle only when sandbox=false (treat as "approved prebuilt bundle").
+    if locked and sandbox:
+        raise HTTPException(status_code=403, detail="bundle_forbidden_locked_plugin")
+    if (not locked) and (not sandbox):
+        raise HTTPException(status_code=403, detail="bundle_requires_sandbox_true")
+
+    bundle_file = str(getattr(ui, "bundle_file", "ui/ui.bundle.js") or "ui/ui.bundle.js")
+    bundle_path = _safe_join_under_dir(plugin.plugin_dir, bundle_file)
+    if not os.path.isfile(bundle_path):
+        raise HTTPException(status_code=404, detail="bundle_file_not_found")
+
+    try:
+        js = open(bundle_path, "r", encoding="utf-8").read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"bundle_read_failed: {e}")
+
+    return Response(content=js, media_type="application/javascript")
 
 
 class PluginExecuteRequest(BaseModel):
@@ -869,11 +955,31 @@ def plugins_create_from_python(req: PluginCreateFromPythonRequest) -> PluginCrea
             "subprocess": req.side_effects_subprocess,
         },
         "resources": {"gpu": "forbidden", "threads": int(req.threads or 1)},
+        "ui": {
+            "mode": "schema",
+            "schema_file": "ui.yaml",
+            "bundle_file": "ui/ui.bundle.js",
+            "sandbox": True,
+        },
     }
+
+    ui_schema = (
+        "version: 1\n"
+        "sections:\n"
+        "  - type: builtin\n"
+        "    component: node_inputs\n"
+        "  - type: builtin\n"
+        "    component: node_parameters\n"
+        "  - type: builtin\n"
+        "    component: run_panel\n"
+        "  - type: builtin\n"
+        "    component: plugin_description\n"
+    )
 
     try:
         os.makedirs(plugin_dir, exist_ok=False)
         _write_text(os.path.join(plugin_dir, "wrapper.py"), wrapper)
+        _write_text(os.path.join(plugin_dir, "ui.yaml"), ui_schema)
         with open(os.path.join(plugin_dir, "plugin.yaml"), "w", encoding="utf-8") as f:
             yaml.safe_dump(manifest, f, sort_keys=False)
     except FileExistsError:

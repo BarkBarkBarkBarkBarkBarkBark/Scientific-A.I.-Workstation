@@ -141,6 +141,19 @@ trap cleanup INT TERM EXIT
 
 log "root: $ROOT_DIR"
 
+if ! command -v uv >/dev/null 2>&1; then
+  die "uv not found on PATH. Install uv (Linux/macOS): curl -LsSf https://astral.sh/uv/install.sh | sh"
+fi
+
+PYTHON_BIN=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  die "python3/python not found on PATH"
+fi
+
 mkdir -p "$ROOT_DIR/.saw" "$ROOT_DIR/saw-workspace"
 touch "$ROOT_DIR/.saw/caps.json" "$ROOT_DIR/saw-workspace/todo.md"
 chmod 700 "$ROOT_DIR/.saw" || true
@@ -156,23 +169,24 @@ else
   warn "docker or docker-compose.yml not found; skipping postgres startup"
 fi
 
-if ! command -v python >/dev/null 2>&1; then
-  die "python not found on PATH"
-fi
-
 if [[ ! -d ".venv" ]]; then
   log "creating .venv..."
-  python -m venv .venv
+  uv venv --python "$PYTHON_BIN" .venv
+fi
+
+VENV_PY="$ROOT_DIR/.venv/bin/python"
+if [[ ! -x "$VENV_PY" ]]; then
+  die "venv python not found or not executable: $VENV_PY"
 fi
 
 # shellcheck disable=SC1091
 source ".venv/bin/activate"
 
 log "installing SAW API deps..."
-pip install -r services/saw_api/requirements.txt >/dev/null
+uv pip install -r services/saw_api/requirements.txt >/dev/null
 
 log "installing Patch Engine deps..."
-pip install -r services/patch_engine/requirements.txt >/dev/null
+uv pip install -r services/patch_engine/requirements.txt >/dev/null
 
 export SAW_ENABLE_DB
 export SAW_ENABLE_PLUGINS
@@ -187,7 +201,7 @@ if [[ "$RELOAD_MODE" -eq 1 ]]; then
 fi
 
 log "starting SAW API on ${API_HOST}:${API_PORT} ..."
-python -m uvicorn services.saw_api.app.main:app \
+"$VENV_PY" -m uvicorn services.saw_api.app.main:app \
   --host "$API_HOST" --port "$API_PORT" \
   "${UVICORN_RELOAD_ARGS[@]}" --reload-dir "services/saw_api" &
 API_PID=$!
@@ -202,7 +216,7 @@ for _ in $(seq 1 60); do
 done
 
 log "starting Patch Engine on ${PATCH_ENGINE_HOST}:${PATCH_ENGINE_PORT} ..."
-python -m uvicorn services.patch_engine.app.main:app \
+"$VENV_PY" -m uvicorn services.patch_engine.app.main:app \
   --host "$PATCH_ENGINE_HOST" --port "$PATCH_ENGINE_PORT" \
   "${UVICORN_RELOAD_ARGS[@]}" --reload-dir "services/patch_engine" &
 PATCH_ENGINE_PID=$!

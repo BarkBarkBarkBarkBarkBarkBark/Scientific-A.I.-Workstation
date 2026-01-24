@@ -3,15 +3,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
 import { ResizableDivider } from './ui/ResizableDivider'
-import { AudioLowpassInspector } from './inspector/AudioLowpassInspector'
 import { SourceViewer } from './SourceViewer'
-import { IngestDirectoryModule } from './modules/IngestDirectoryModule'
-import { BouncingTextModule } from './modules/BouncingTextModule'
-import { ZlabSortModule } from './modules/ZlabSortModule'
 import { ReadOnlyFileViewer } from './ReadOnlyFileViewer'
 import { NodeInputs } from './inspector/NodeInputs'
 import { NodeParameters } from './inspector/NodeParameters'
+import { NodeRunPanel } from './inspector/NodeRunPanel'
 import { fetchDevTree, type DevTreeNode } from '../dev/runtimeTree'
+import { SchemaPluginUi } from './plugin_ui/SchemaPluginUi'
+import { BundlePluginUi } from './plugin_ui/BundlePluginUi'
 
 type TreeNode =
   | { kind: 'dir'; name: string; path: string; children: TreeNode[] }
@@ -183,12 +182,16 @@ export function ModuleFullscreenModal() {
 
   if (!fullscreen.open || !node || !plugin) return null
 
-  const isZlabSort = plugin.id === 'zlab.sorting_script'
-
-  const lastRun = node.data.runtime?.exec?.last ?? null
-  const running = node.data.status === 'running'
-  const rawStdout = lastRun?.rawStdout ?? ''
-  const rawStderr = lastRun?.rawStderr ?? ''
+  const defaultUi = (
+    <>
+      <NodeInputs nodeId={node.id} />
+      <NodeParameters nodeId={node.id} />
+      {isWorkspacePlugin ? <NodeRunPanel nodeId={node.id} /> : null}
+      <div className="space-y-2">
+        <div className="text-sm text-zinc-200">{plugin.description}</div>
+      </div>
+    </>
+  )
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/70 p-4">
@@ -218,105 +221,12 @@ export function ModuleFullscreenModal() {
             <Panel title="Module" className="min-h-0 overflow-hidden">
               <div className="h-full overflow-auto p-3">
                 <div className="space-y-3">
-                  {isZlabSort ? (
-                    <ZlabSortModule nodeId={node.id} />
+                  {plugin.ui?.mode === 'bundle' ? (
+                    <BundlePluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
+                  ) : plugin.ui?.mode === 'schema' ? (
+                    <SchemaPluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
                   ) : (
-                    <>
-                      <NodeInputs nodeId={node.id} />
-                      <NodeParameters nodeId={node.id} />
-
-                      {isWorkspacePlugin ? (
-                        <div className="rounded-md border border-zinc-800 bg-zinc-950/30 p-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs font-semibold tracking-wide text-zinc-200">Run</div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                disabled={running}
-                                onClick={() => void runPluginNode(node.id)}
-                                className="rounded-md bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-zinc-50 hover:bg-emerald-600 disabled:opacity-50"
-                                title="Execute this plugin via SAW API"
-                              >
-                                {running ? 'Running…' : 'Run'}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!lastRun}
-                                onClick={() => {
-                                  if (!lastRun) return
-                                  const blob = new Blob([JSON.stringify(lastRun.outputs ?? {}, null, 2)], { type: 'application/json' })
-                                  const url = URL.createObjectURL(blob)
-                                  const a = document.createElement('a')
-                                  a.href = url
-                                  a.download = `${plugin.id.replace(/[^a-zA-Z0-9._-]/g, '_')}_outputs.json`
-                                  a.click()
-                                  setTimeout(() => URL.revokeObjectURL(url), 1000)
-                                }}
-                                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
-                                title="Download last outputs JSON"
-                              >
-                                Download outputs
-                              </button>
-                            </div>
-                          </div>
-
-                          {lastRun ? (
-                            <div className="mt-2 space-y-2">
-                              <div className="text-[11px] text-zinc-500">
-                                last: {new Date(lastRun.ranAt).toLocaleString()} •{' '}
-                                <span className={lastRun.ok ? 'text-emerald-300' : 'text-red-300'}>
-                                  {lastRun.ok ? 'ok' : 'error'}
-                                </span>
-                              </div>
-                              {lastRun.error ? <div className="text-[11px] text-red-300">{String(lastRun.error)}</div> : null}
-                              <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
-                                {JSON.stringify(lastRun.outputs ?? {}, null, 2)}
-                              </pre>
-                              {rawStdout || rawStderr ? (
-                                <div className="space-y-2">
-                                  <div className="text-[11px] font-semibold text-zinc-400">Raw Python output</div>
-                                  {rawStdout ? (
-                                    <div>
-                                      <div className="text-[11px] text-zinc-500">stdout</div>
-                                      <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
-                                        {rawStdout}
-                                      </pre>
-                                    </div>
-                                  ) : null}
-                                  {rawStderr ? (
-                                    <div>
-                                      <div className="text-[11px] text-zinc-500">stderr</div>
-                                      <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap font-mono text-[11px] text-red-200">
-                                        {rawStderr}
-                                      </pre>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <div className="mt-2 text-[11px] text-zinc-500">No runs yet.</div>
-                          )}
-                        </div>
-                      ) : null}
-                    </>
-                  )}
-
-                  {plugin.id === 'audio_lowpass' ? (
-                    <AudioLowpassInspector nodeId={node.id} />
-                  ) : plugin.id === 'saw.ingest.directory' ? (
-                    <IngestDirectoryModule nodeId={node.id} />
-                  ) : plugin.id === 'saw.example.bouncing_text' ? (
-                    <BouncingTextModule nodeId={node.id} />
-                  ) : plugin.id === 'zlab.sorting_script' ? (
-                    <div className="space-y-2">
-                      <div className="text-sm text-zinc-200">ZLab spike sorting pipeline UI is on the left.</div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-sm text-zinc-200">{plugin.description}</div>
-                      <div className="text-xs text-zinc-500">(TODO: module-specific UI goes here.)</div>
-                    </div>
+                    <div className="space-y-3">{defaultUi}</div>
                   )}
                 </div>
               </div>

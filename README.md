@@ -64,7 +64,7 @@ OPENAI_MODEL="gpt-4o-mini"  # or another supported model
 ```
 
 ```bash
-cd "/Scientific A.I. Workstation"
+cd "/Scientific-AI-Workstation"
 npm install
 npm run dev
 ```

@@ -71,6 +71,22 @@ trap cleanup INT TERM EXIT
 
 echo "[dev_all] root: $ROOT_DIR"
 
+if ! command -v uv >/dev/null 2>&1; then
+  echo "[dev_all] ERROR: uv not found on PATH." >&2
+  echo "[dev_all] Install uv (macOS/Linux): curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  exit 127
+fi
+
+PYTHON_BIN=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "[dev_all] ERROR: python3/python not found on PATH" >&2
+  exit 127
+fi
+
 if command -v docker >/dev/null 2>&1; then
   echo "[dev_all] starting postgres (docker compose up -d)..."
   docker compose up -d >/dev/null
@@ -80,17 +96,23 @@ fi
 
 if [[ ! -d ".venv" ]]; then
   echo "[dev_all] creating .venv..."
-  python -m venv .venv
+  uv venv --python "$PYTHON_BIN" .venv
+fi
+
+VENV_PY="$ROOT_DIR/.venv/bin/python"
+if [[ ! -x "$VENV_PY" ]]; then
+  echo "[dev_all] ERROR: venv python not found or not executable: $VENV_PY" >&2
+  exit 127
 fi
 
 # shellcheck disable=SC1091
 source ".venv/bin/activate"
 
 echo "[dev_all] installing SAW API deps..."
-pip install -r services/saw_api/requirements.txt >/dev/null
+uv pip install -r services/saw_api/requirements.txt >/dev/null
 
 echo "[dev_all] installing Patch Engine deps..."
-pip install -r services/patch_engine/requirements.txt >/dev/null
+uv pip install -r services/patch_engine/requirements.txt >/dev/null
 
 export SAW_ENABLE_DB
 export SAW_ENABLE_PLUGINS
@@ -101,7 +123,7 @@ export SAW_PATCH_APPLY_ALLOWLIST
 
 echo "[dev_all] starting SAW API on ${API_HOST}:${API_PORT} ..."
 # IMPORTANT: keep reload scope narrow so patches don't restart the API mid-flight.
-python -m uvicorn services.saw_api.app.main:app --host "$API_HOST" --port "$API_PORT" --reload --reload-dir "services/saw_api" &
+"$VENV_PY" -m uvicorn services.saw_api.app.main:app --host "$API_HOST" --port "$API_PORT" --reload --reload-dir "services/saw_api" &
 API_PID=$!
 
 echo "[dev_all] waiting for SAW API /health ..."
@@ -115,7 +137,7 @@ done
 
 echo "[dev_all] starting Patch Engine on ${PATCH_ENGINE_HOST}:${PATCH_ENGINE_PORT} ..."
 # IMPORTANT: keep reload scope narrow so patch ops don't restart patch_engine mid-flight.
-python -m uvicorn services.patch_engine.app.main:app --host "$PATCH_ENGINE_HOST" --port "$PATCH_ENGINE_PORT" --reload --reload-dir "services/patch_engine" &
+"$VENV_PY" -m uvicorn services.patch_engine.app.main:app --host "$PATCH_ENGINE_HOST" --port "$PATCH_ENGINE_PORT" --reload --reload-dir "services/patch_engine" &
 PATCH_ENGINE_PID=$!
 
 echo "[dev_all] waiting for Patch Engine /health ..."

@@ -25,7 +25,7 @@ from typing import Any
 import json as _agent_json
 from datetime import datetime as _agent_datetime
 
-_AGENT_LOG_PATH = "/Users/marco/Cursor_Folder/Cursor_Codespace/Scientific A.I. Workstation/.cursor/debug.log"
+_AGENT_LOG_PATH = "/Users/marco/Cursor_Folder/Cursor_Codespace/Scientific-AI-Workstation/.cursor/debug.log"
 _AGENT_SESSION = "debug-session"
 
 def _agent_log(hypothesis: str, location: str, message: str, data: dict | None = None) -> None:

@@ -42,6 +42,13 @@ export const ResourcesSpecSchema = z.object({
   threads: z.number().int().positive().optional(),
 })
 
+export const PluginUiSpecSchema = z.object({
+  mode: z.enum(['schema', 'bundle']).default('schema'),
+  schema_file: z.string().default('ui.yaml'),
+  bundle_file: z.string().default('ui/ui.bundle.js'),
+  sandbox: z.boolean().default(true),
+})
+
 export const PluginManifestSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -57,6 +64,7 @@ export const PluginManifestSchema = z.object({
   execution: ExecutionSpecSchema,
   side_effects: SideEffectsSpecSchema,
   resources: ResourcesSpecSchema,
+  ui: PluginUiSpecSchema.optional().nullable(),
 })
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>
@@ -100,6 +108,7 @@ export function buildDiceRollerManifest(p: CreateDiceRollerParams): PluginManife
     execution: { deterministic: true, cacheable: true },
     side_effects: { network: 'none', disk: 'read_only', subprocess: 'forbidden' },
     resources: { gpu: 'forbidden', threads: 1 },
+    ui: { mode: 'schema', schema_file: 'ui.yaml', bundle_file: 'ui/ui.bundle.js', sandbox: true },
   }
 
   // Runtime validation; throws if invalid
@@ -199,6 +208,7 @@ export function buildCreatePluginToolArgsFromPython(args: {
       subprocess: args.sideEffects?.subprocess ?? 'forbidden',
     },
     resources: { gpu: 'forbidden', threads: args.threads ?? 1 },
+    ui: { mode: 'schema', schema_file: 'ui.yaml', bundle_file: 'ui/ui.bundle.js', sandbox: true },
   }
 
   PluginManifestSchema.parse(manifest)

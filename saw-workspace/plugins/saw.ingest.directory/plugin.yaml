@@ -51,4 +51,10 @@ resources:
   gpu: "forbidden"
   threads: 1
 
+ui:
+  mode: "bundle"
+  schema_file: "ui.yaml"
+  bundle_file: "ui/ui.bundle.js"
+  sandbox: true
+
 
