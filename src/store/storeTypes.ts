@@ -54,7 +54,12 @@ export type SawState = {
 
   // Chat
   chatBusy: boolean
-  chat: { messages: ChatMessage[]; conversationId: string | null; pendingTool: AgentToolCall | null }
+  chat: {
+    messages: ChatMessage[]
+    conversationId: string | null
+    pendingTool: AgentToolCall | null
+    streamMode?: 'sse' | 'json'
+  }
 
   // Dev / patch engine
   dev: { attachedPaths: string[]; lastForbidden?: { op: string; path: string; patch?: string } | null }

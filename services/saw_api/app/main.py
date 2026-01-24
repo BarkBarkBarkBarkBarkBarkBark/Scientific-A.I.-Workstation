@@ -9,7 +9,7 @@ import sys
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pgvector.psycopg import Vector
@@ -25,6 +25,7 @@ from .settings import get_settings
 from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
 from .agent import agent_chat, agent_approve
+from .agent_runtime.copilot_agent import copilot_enabled, copilot_manager
 from .agent_log import agent_log_path
 from . import env_manager
 from .stock_plugins_catalog import (
@@ -101,12 +102,64 @@ class AgentApproveRequest(BaseModel):
 
 
 @app.post("/agent/chat")
-def agent_chat_post(req: AgentChatRequest) -> dict[str, Any]:
-    return agent_chat(conversation_id=req.conversation_id, message=req.message)
+async def agent_chat_post(req: AgentChatRequest, stream: bool = Query(False)) -> Any:
+    # Legacy JSON mode (existing frontend usage)
+    if not stream:
+        return agent_chat(conversation_id=req.conversation_id, message=req.message)
+
+    # Streaming SSE mode (required for Copilot tool approval gating)
+    async def gen_openai_once() -> Any:
+        # Wrap the existing sync agent in a single-shot SSE stream.
+        r = agent_chat(conversation_id=req.conversation_id, message=req.message)
+        cid = (r or {}).get("conversation_id") or req.conversation_id or ""
+        yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.started', 'payload': {'provider': 'openai'}})}\n\n"
+        if (r or {}).get("status") == "needs_approval":
+            tc = (r or {}).get("tool_call") or {}
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'permission.request', 'payload': {'kind': 'write', 'toolCallId': tc.get('id'), 'details': tc}})}\n\n"
+            # In JSON mode, the UI will call /agent/approve; in SSE mode we just go idle.
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.idle', 'payload': {}})}\n\n"
+            return
+        msg = (r or {}).get("message") or (r or {}).get("error") or ""
+        yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'assistant.message', 'payload': {'content': msg}})}\n\n"
+        yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.idle', 'payload': {}})}\n\n"
+
+    if not copilot_enabled():
+        return StreamingResponse(gen_openai_once(), media_type="text/event-stream")
+
+    mgr = copilot_manager()
+    try:
+        conv, q = await mgr.stream_chat(conversation_id=req.conversation_id, message=req.message)
+    except Exception as e:
+        async def gen_err() -> Any:
+            cid = (req.conversation_id or "")
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.started', 'payload': {'provider': 'copilot'}})}\n\n"
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.error', 'payload': {'message': str(e)}})}\n\n"
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.idle', 'payload': {}})}\n\n"
+        return StreamingResponse(gen_err(), media_type="text/event-stream")
+
+    async def gen() -> Any:
+        # Drain queue until idle or error.
+        try:
+            while True:
+                ev = await q.get()
+                yield f"event: saw.agent.event\ndata: {json.dumps(ev)}\n\n"
+                if ev.get("type") in ("session.idle", "session.error"):
+                    break
+        finally:
+            # Ensure stream closes cleanly.
+            pass
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.post("/agent/approve")
 def agent_approve_post(req: AgentApproveRequest) -> dict[str, Any]:
+    # If Copilot mode is enabled, first try to resolve a pending Copilot-gated tool call.
+    if copilot_enabled():
+        ok = copilot_manager().approve(req.conversation_id, req.tool_call_id, bool(req.approved))
+        if ok:
+            return {"status": "ok", "conversation_id": req.conversation_id, "message": "ack", "model": "copilot"}
+    # Fallback to existing OpenAI approval flow.
     return agent_approve(conversation_id=req.conversation_id, tool_call_id=req.tool_call_id, approved=req.approved)
 
 

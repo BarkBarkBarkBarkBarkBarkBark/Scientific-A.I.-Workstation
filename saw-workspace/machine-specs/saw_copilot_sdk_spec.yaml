@@ -1,0 +1,543 @@
+"""MR_SAW_COPILOT_SDK_MIGRATION_SPEC_v0.3
+
+This spec is intentionally *repo-accurate* for Scientific AI Workstation (SAW).
+It describes how to hot-swap the current OpenAI tool-loop agent with the GitHub Copilot SDK
+while preserving SAW invariants (patch-only, approval-gated writes) and minimizing churn.
+"""
+
+saw_migration_spec_version: "0.3"
+id: "saw-copilot-sdk-migration"
+created_at: "2026-01-23"
+status: "draft"
+
+project:
+  name: "Scientific AI Workstation (SAW)"
+  repo: "BarkBarkBarkBarkBarkBarkBark/Scientific-A.I.-Workstation"
+
+principles:
+  - local_first
+  - human_in_the_loop
+  - patch_only_edits
+  - shell_vs_workspace_separation
+  - deterministic_rollback
+  - least_privilege
+  - no_silent_writes
+
+# -----------------------------------------------------------------------------
+# Reality check: what exists today
+# -----------------------------------------------------------------------------
+
+current_system_contracts:
+  frontend_to_backend:
+    # Frontend calls these (see src/ai/client.ts) and expects JSON.
+    # Vite dev proxy routes /api/saw/* to SAW API.
+    routes:
+      - external: "/api/saw/agent/chat"
+        saw_api: "/agent/chat"
+        request: { conversation_id: "string|null", message: "string" }
+        response_union:
+          - { status: "ok", conversation_id: "string", message: "string", model: "string|null" }
+          - { status: "needs_approval", conversation_id: "string", tool_call: { id: "string", name: "string", arguments: "any" } }
+          - { status: "error", conversation_id: "string|null", error: "string" }
+      - external: "/api/saw/agent/approve"
+        saw_api: "/agent/approve"
+        request: { conversation_id: "string", tool_call_id: "string", approved: "boolean" }
+        response: "same union as /agent/chat"
+
+  agent_runtime:
+    # Current agent entrypoints are imported by services/saw_api/app/agent.py
+    implementation_files:
+      - "services/saw_api/app/agent_runtime/core.py"   # OpenAI tool loop (today)
+      - "services/saw_api/app/agent_runtime/tools.py"  # Patch Engine-backed tools + read/write classification
+
+  write_gate:
+    # In this repo, writes are enforced by Patch Engine endpoints that SAW API calls.
+    authoritative_service: "services/patch_engine"
+    endpoints_used_by_agent_tools:
+      - "/api/dev/safe/write"
+      - "/api/dev/safe/applyPatch"
+      - "/api/dev/caps"
+      - "/api/dev/git/commit"
+
+  openai_usage_that_must_remain:
+    - "embeddings + ingest endpoints in SAW API (pgvector flow)"
+
+# -----------------------------------------------------------------------------
+# Migration intent
+# -----------------------------------------------------------------------------
+
+migration_intent:
+  swap_only_agent_brain:
+    description: >
+      Replace the LLM+tool-loop in services/saw_api/app/agent_runtime/core.py
+      (currently OpenAI chat.completions tool calls) with Copilot SDK sessions.
+    keep_frontend_contract_initially: true
+    keep_openai_for_embeddings: true
+
+  desired_user_experience:
+    - "Chat remains in existing SAW Chat UI"
+    - "Tool calls are visible"
+    - "All write-like actions are approval gated"
+    - "Diff review remains the canonical way to apply changes"
+
+assumptions:
+  - "Copilot CLI is installed and available on PATH (or via COPILOT_CLI_PATH)."
+  - "Copilot CLI is authenticated (user has Copilot entitlement)."
+  - "SAW Patch Engine remains the only writer; agent never writes directly."
+  - "We accept github_copilot_sdk==0.1.0 / protocol v2 technical preview constraints."
+
+non_goals:
+  - "Move embeddings/vectorization away from OpenAI."
+  - "Redesign plugin runtime."
+  - "Multi-user auth and remote deployment hardening."
+
+# -----------------------------------------------------------------------------
+# Key Copilot SDK facts that drive the design
+# -----------------------------------------------------------------------------
+
+copilot_sdk_facts:
+  python_package: "copilot" # from github_copilot_sdk
+  transport: "Copilot CLI JSON-RPC (stdio default)"
+  protocol_version: 2
+  important_constraints:
+    - "Copilot SDK permission requests are synchronous from the CLI's perspective."
+    - "To preserve SAW's approve/reject UX, the agent runtime must stream events so the UI can approve while the LLM is waiting."
+    - "Do NOT use system_message.mode=replace (removes guardrails)."
+
+# -----------------------------------------------------------------------------
+# Recommended architecture (harmonized with this repo)
+# -----------------------------------------------------------------------------
+
+target_architecture:
+  mvp_mode: "in_process"  # run Copilot SDK inside saw_api first
+  rationale:
+    - "Minimize moving parts: no new service until behavior is proven."
+    - "Frontend crashes/reloads do not kill saw_api (agent remains alive)."
+    - "Later, extraction to sidecar is straightforward if needed."
+
+  optional_followup_mode: "sidecar"  # saw_copilotd (future)
+  when_to_extract:
+    - "Need independent restart/upgrade of agent runtime"
+    - "Need long-lived sessions across saw_api restarts"
+    - "Need resource isolation"
+
+  processes:
+    - name: "frontend"
+      role: "Chat UI, diff review UI"
+    - name: "saw_api"
+      role: "HTTP API + Patch Engine client + Copilot SDK session manager (MVP)"
+    - name: "copilot_cli"
+      role: "LLM runtime, emits tool + permission requests via JSON-RPC"
+    - name: "patch_engine"
+      role: "Authoritative safe filesystem ops + git ops (approval-gated)"
+
+# -----------------------------------------------------------------------------
+# Streaming contract (required for Copilot permission gating)
+# -----------------------------------------------------------------------------
+
+api_changes:
+  note: >
+    The existing /agent/chat JSON response cannot support Copilot's permission-request flow
+    without either (a) blocking the request until the user approves (UI can't), or
+    (b) streaming the permission request to the UI.
+    Therefore we add a streaming variant while keeping the legacy JSON endpoints for fallback.
+
+  keep_legacy_endpoints:
+    - "/agent/chat"   # JSON (existing)
+    - "/agent/approve" # JSON (existing)
+
+  add_streaming_endpoints_mvp:
+    - method: "POST"
+      path: "/agent/chat"
+      query_params:
+        stream: "boolean"  # when true, return SSE instead of JSON
+      purpose: "stream session events (assistant deltas, tool calls, permission requests)"
+      response:
+        content_type: "text/event-stream"
+
+    - method: "POST"
+      path: "/agent/approve"
+      purpose: "approve/deny a pending permission request (write/shell/mcp/url/read)"
+      request:
+        conversation_id: "string"
+        tool_call_id: "string"     # maps to Copilot toolCallId
+        approved: "boolean"
+        # optional: kind override for debugging
+      response:
+        # For streaming sessions, this should ACK quickly; the stream continues.
+        ack: { ok: "boolean" }
+
+  sse_event_schema:
+    event: "saw.agent.event"
+    data:
+      conversation_id: "string"
+      type: "string"   # one of the types below
+      payload: "object"
+    types:
+      - "session.started"
+      - "assistant.message_delta"      # payload: { delta: string }
+      - "assistant.message"            # payload: { content: string }
+      - "tool.call"                    # payload: { id, name, arguments }
+      - "tool.result"                  # payload: { id, name, resultType, textResultForLlm }
+      - "permission.request"           # payload: { kind, toolCallId, details }
+      - "permission.resolved"          # payload: { kind, toolCallId, approved }
+      - "session.idle"
+      - "session.error"                # payload: { message }
+
+# -----------------------------------------------------------------------------
+# Tooling (harmonized with existing SAW tools)
+# -----------------------------------------------------------------------------
+
+tools_exposed_to_copilot:
+  source_of_truth: "services/saw_api/app/agent_runtime/tools.py"
+  naming: "Keep existing tool names to reduce prompt churn and preserve logs."
+
+  classification:
+    read_tools:
+      - dev_tree
+      - dev_file
+      - git_status
+      - get_todo
+      - get_agent_workspace
+      - validate_plugin_manifest
+    write_tools_approval_gated:
+      # These are still *Patch Engine* calls; approval is enforced via SAW UI.
+      - set_caps
+      - safe_write
+      - write_todo
+      - write_agent_workspace
+      - apply_patch
+      - git_commit
+      - create_plugin
+
+  invariants:
+    - "No tool may write outside Patch Engine safe endpoints."
+    - "Write tools require explicit user approval; deny by default."
+    - "Any tool that executes subprocesses must be allowlisted (MVP: none)."
+
+# -----------------------------------------------------------------------------
+# Permission & approval model (optimized and implementable)
+# -----------------------------------------------------------------------------
+
+approval_model:
+  philosophy: "Copilot waits; UI approves; Patch Engine enforces."
+
+  how_it_works:
+    - "Copilot CLI emits a permission.request (kind=write|shell|mcp|read|url) with toolCallId."
+    - "SAW emits SSE event permission.request to the frontend immediately."
+    - "Frontend calls /agent/approve with tool_call_id + approved boolean."
+    - "SAW resolves the waiting permission handler and continues the Copilot session."
+
+  default_policy:
+    allow_kinds_without_prompt:
+      - read   # repo reads via our read tools only
+    require_user_approval:
+      - write
+      - shell
+      - mcp
+      - url
+    hard_deny_always:
+      - url  # default deny until explicitly enabled
+
+  notes:
+    - "This model requires streaming; otherwise the UI cannot see the toolCallId in time."
+    - "Legacy JSON /agent/chat can remain for OpenAI fallback and non-streaming usage."
+
+# -----------------------------------------------------------------------------
+# Patch safety requirements (aligned with Patch Engine spec)
+# -----------------------------------------------------------------------------
+
+patch_engine_requirements:
+  validate_before_apply:
+    - "patch parses cleanly (unified diff)"
+    - "paths are within allowlist (workspace plugin/tool areas)"
+    - "denylist enforced (.env, keys, .git, node_modules, dist, .saw)"
+    - "dry-run apply (Patch Engine safe/applyPatch does checks)"
+  apply_flow:
+    steps:
+      - "user approves"
+      - "Patch Engine applies transactionally"
+      - "optional validations"
+      - "optional git commit"
+  rollback:
+    rule: "If patch fails to apply, do not fuzz; re-read and regenerate."
+
+# -----------------------------------------------------------------------------
+# Implementation plan (phased, minimal churn)
+# -----------------------------------------------------------------------------
+
+implementation_plan:
+  phase_0_baseline:
+    goal: "Keep existing OpenAI agent working as fallback"
+    deliverables:
+      - "Feature flag SAW_AGENT_PROVIDER=openai|copilot"
+      - "No frontend changes yet"
+
+  phase_1_streaming_transport:
+    goal: "Add SSE stream path for agent chat"
+    deliverables:
+      - "Extend /agent/chat with ?stream=1 that returns SSE"
+      - "Frontend support: when provider=copilot, use streaming mode"
+
+  phase_2_copilot_runtime:
+    goal: "Swap brain behind streaming endpoint"
+    deliverables:
+      - "CopilotClient lifecycle managed by saw_api"
+      - "Per-conversation CopilotSession"
+      - "Tool registry backed by existing agent_runtime/tools.py"
+      - "Permission handler that waits on /agent/approve"
+
+  phase_3_cutover:
+    goal: "Make Copilot default for chat"
+    deliverables:
+      - "SAW_AGENT_PROVIDER defaults to copilot when CLI is available"
+      - "Graceful error if CLI not installed/authenticated"
+
+  optional_phase_4_sidecar_extraction:
+    goal: "Extract Copilot runtime into services/saw_copilotd"
+    note: "Only after MVP works end-to-end"
+
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
+
+configuration:
+  env_vars:
+    required_for_copilot_agent:
+      - name: "SAW_AGENT_PROVIDER"
+        example: "copilot" # or openai
+      - name: "COPILOT_CLI_PATH"
+        example: "copilot"
+    optional:
+      - name: "SAW_AGENT_MODEL"
+        example: "gpt-5" # only if supported by Copilot runtime; otherwise omit
+      - name: "OPENAI_API_KEY"
+        purpose: "embeddings + OpenAI fallback agent"
+
+acceptance_criteria:
+  functional:
+    - "When SAW_AGENT_PROVIDER=copilot, chat uses Copilot SDK (via SSE)"
+    - "When a write tool is requested, UI receives permission.request and can approve/reject"
+    - "Approved writes go through Patch Engine safe endpoints only"
+    - "Embeddings + ingest endpoints continue to work unchanged"
+  regression:
+    - "Legacy JSON chat still works with SAW_AGENT_PROVIDER=openai"
+  observability:
+    - "Agent log records tool.call + tool.result + permission decisions"
+  validate_before_apply:
+    - "patch parses cleanly (unified diff)"
+    - "paths are within workspace_root allowlist"
+    - "denylist enforced (.env, secrets, keychains, credentials)"
+    - "max files touched and max diff size enforced"
+    - "dry-run apply in temp checkout or git worktree"
+  apply_flow:
+    steps:
+      - "create git checkpoint commit/tag: saw/checkpoint/<timestamp>"
+      - "apply patch"
+      - "run suggested checks (optional but recommended)"
+      - "if checks fail: auto-rollback to checkpoint; mark proposal failed"
+      - "if pass: commit with message: 'saw: <proposal_title>'"
+  audit_log:
+    store:
+      preferred: "postgres"
+      alternative: "local sqlite/jsonl"
+    record_fields:
+      - "proposal_id"
+      - "timestamp"
+      - "session_id"
+      - "user_approval"
+      - "files_touched"
+      - "checks_run"
+      - "result"
+      - "rollback_performed"
+      - "diff_hash"
+
+crash_recovery_spec:
+  detection:
+    mechanisms:
+      - "frontend heartbeat (websocket/ping) to saw_api"
+      - "watchdog polls saw_api(/healthz) and saw_copilotd(/healthz)"
+      - "detect 'last applied proposal' within crash window"
+  recovery_ui:
+    strategy:
+      - "serve minimal recovery UI at /recovery in existing frontend (or minimal static page served by saw_api)"
+      - "watchdog opens default browser window to http://127.0.0.1:<saw_api_port>/recovery"
+    capabilities:
+      - "connect to existing copilot session or spawn a new 'recovery' session"
+      - "show last proposals + last checkpoint commit"
+      - "one-click rollback request (still approval gated)"
+      - "export diagnostics bundle (logs, status, recent diffs) for debugging"
+  rollback_mechanisms:
+    preferred:
+      - "git reset --hard <checkpoint_commit> (local-only; simplest)"
+    safer_alternative:
+      - "git revert <bad_commit_range> (preserves history)"
+    approval:
+      required: true
+      ui_copy: "Rollback requires explicit approval. This will discard/undo recent changes."
+
+implementation_plan:
+  phases:
+    - name: "P0_provider_interface"
+      outcomes:
+        - "Introduce AgentProvider interface in saw_api"
+        - "Keep OpenAIProvider working (no behavior change yet)"
+      files:
+        create:
+          - "services/saw_api/app/agent/providers/base.py"
+          - "services/saw_api/app/agent/providers/openai_provider.py"
+        modify:
+          - "services/saw_api/app/main.py"
+          - "services/saw_api/app/routes/chat.py"
+    - name: "P1_saw_copilotd_sidecar"
+      outcomes:
+        - "Add new FastAPI service that wraps Copilot SDK and streams events"
+        - "Run via uv; simple /healthz and session endpoints"
+      files:
+        create:
+          - "services/saw_copilotd/pyproject.toml"
+          - "services/saw_copilotd/app/main.py"
+          - "services/saw_copilotd/app/copilot/client.py"
+          - "services/saw_copilotd/app/copilot/session_manager.py"
+          - "services/saw_copilotd/app/tools/registry.py"
+          - "services/saw_copilotd/app/tools/policy.py"
+          - "services/saw_copilotd/.env.example"
+    - name: "P2_wire_chat_to_copilot"
+      outcomes:
+        - "Frontend chat panel uses saw_api chat endpoints"
+        - "saw_api uses CopilotSDKProvider (HTTP proxy to saw_copilotd)"
+        - "Streaming tokens in UI"
+      files:
+        modify:
+          - "services/saw_api/app/routes/chat.py"
+          - "frontend/src/components/Chat/*"
+          - "frontend/src/api/*"
+    - name: "P3_patch_proposals_first"
+      outcomes:
+        - "Copilot can only propose patches via saw.propose_patch tool"
+        - "saw_api validates + stores proposals"
+        - "UI shows diff with Approve/Reject"
+        - "Approve applies patch via patch engine and commits"
+      files:
+        create:
+          - "services/saw_api/app/routes/patches.py"
+          - "services/saw_api/app/patch_engine/validation.py"
+          - "services/saw_api/app/patch_engine/audit.py"
+        modify:
+          - "frontend/src/components/DiffViewer/*"
+          - "frontend/src/components/Chat/ToolEventsPanel/*"
+    - name: "P4_crash_recovery"
+      outcomes:
+        - "Watchdog opens /recovery window when crash/unhealthy"
+        - "Rollback request path works with approval"
+      files:
+        create:
+          - "services/saw_watchdog/pyproject.toml"
+          - "services/saw_watchdog/main.py"
+          - "services/saw_api/app/routes/recovery.py"
+        modify:
+          - "frontend/src/routes/recovery.tsx"
+          - "scripts/run_mvp.sh (or equivalent) to start watchdog + copilotd"
+
+uv_install_and_run:
+  prerequisites:
+    - "uv installed"
+    - "copilot CLI installed and authenticated"
+  workspace_conventions:
+    workspace_root_env: "SAW_WORKSPACE_ROOT"
+    services_root: "services/"
+  commands:
+    - cwd: "services/saw_copilotd"
+      run:
+        - "uv venv"
+        - "uv sync"
+        - "uv run uvicorn app.main:app --host 127.0.0.1 --port 9041"
+    - cwd: "services/saw_api"
+      run:
+        - "uv sync"
+        - "uv run uvicorn app.main:app --host 127.0.0.1 --port 9040"
+  optional_containerization:
+    enabled_default: false
+    use_when:
+      - "you need reproducible dev env across machines"
+      - "you accept extra complexity for filesystem mounts + GUI recovery open"
+    notes:
+      - "If containerized, mount workspace_root read-only; patches still applied by saw_api on host or via a controlled mount"
+
+configuration:
+  env_vars:
+    required:
+      - name: "SAW_WORKSPACE_ROOT"
+        example: "/absolute/path/to/Scientific-A.I.-Workstation"
+      - name: "SAW_API_PORT"
+        example: "9040"
+      - name: "SAW_COPILOTD_PORT"
+        example: "9041"
+      - name: "COPILOT_CLI_PATH"
+        example: "copilot"
+    optional:
+      - name: "OPENAI_API_KEY"
+        purpose: "embeddings + optional fallback provider"
+      - name: "SAW_AGENT_PROVIDER"
+        example: "copilot" # "copilot" | "openai"
+      - name: "SAW_AGENT_MODE_DEFAULT"
+        example: "yolo" # "safe" | "yolo"
+      - name: "SAW_PATCH_MAX_BYTES"
+        example: "500000"
+      - name: "SAW_PATCH_MAX_FILES"
+        example: "25"
+  config_files:
+    - path: ".env.example"
+      add:
+        - "SAW_WORKSPACE_ROOT"
+        - "SAW_API_PORT"
+        - "SAW_COPILOTD_PORT"
+        - "COPILOT_CLI_PATH"
+        - "SAW_AGENT_PROVIDER"
+        - "SAW_AGENT_MODE_DEFAULT"
+    - path: "services/saw_copilotd/.env.example"
+      add:
+        - "SAW_WORKSPACE_ROOT"
+        - "SAW_COPILOTD_PORT"
+        - "COPILOT_CLI_PATH"
+
+future_proof_extensions:
+  model_management:
+    - "Expose available models at runtime (list/select) in UI"
+    - "Per-session model override + 'choose model for step' UX"
+  mcp_support:
+    - "Add MCP registry + connect/disconnect MCP servers per workspace"
+    - "Expose MCP tools to Copilot via controlled allowlist"
+  skills_and_agents:
+    - "SAW skill packs: 'plugin_authoring', 'patch_review', 'db_migrations', 'job_runner_debugger'"
+    - "Specialized recovery agent profile tuned for rollback + diagnostics"
+  memory_and_compaction:
+    - "Persist session history summaries in pgvector"
+    - "Auto-compact long sessions while retaining patch/audit anchors"
+  enterprise_safety:
+    - "Secret scanning before apply (deny if secrets detected)"
+    - "Network egress deny by default; explicit opt-in per tool"
+    - "Signed patch approvals (user + timestamp + hash)"
+
+acceptance_criteria:
+  functional:
+    - "SAW chat panel responses are generated via Copilot SDK (streaming tokens visible)"
+    - "Copilot can call tools and produce patch proposals, but cannot write directly"
+    - "Diff approval UI shows unified diff; approve applies patch + commits; reject returns rationale to agent"
+    - "On induced frontend crash, recovery UI opens and can guide rollback; rollback requires approval"
+  regression:
+    - "OpenAI embeddings/doc ingestion continues to work unchanged"
+    - "Patch engine remains the only write path"
+  observability:
+    - "Audit log records every proposal + approval + apply + rollback"
+    - "Health endpoints report readiness for saw_api and saw_copilotd"
+
+deliverables_checklist:
+  new_services:
+    - "services/saw_copilotd (FastAPI + Copilot SDK wrapper)"
+    - "services/saw_watchdog (optional, recommended)"
+  modified_services:
+    - "services/saw_api (provider abstraction + proxy + patch proposal endpoints)"
+    - "frontend chat UI (streaming + tool events + diff approval + recovery route)"
+  scripts:
+    - "one-command dev runner starts: postgres (if needed) + saw_api + saw_copilotd + frontend + watchdog"

@@ -6,6 +6,7 @@ pgvector==0.3.6
 pydantic==2.10.4
 PyYAML==6.0.2
 openai==1.58.1
+github-copilot-sdk
 pytest==8.3.4
 
 

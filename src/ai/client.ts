@@ -40,6 +40,12 @@ export type AgentChatResponse =
   | { status: 'needs_approval'; conversation_id: string; tool_call: AgentToolCall }
   | { status: 'error'; conversation_id?: string; error: string }
 
+export type AgentSseEvent = {
+  conversation_id: string
+  type: string
+  payload: any
+}
+
 export async function requestAgentChat(conversationId: string | null, message: string): Promise<AgentChatResponse> {
   const r = await fetch('/api/saw/agent/chat', {
     method: 'POST',
@@ -68,6 +74,76 @@ export async function approveAgentTool(
     throw new Error(`Agent approve request failed: ${t}`)
   }
   return (await r.json()) as AgentChatResponse
+}
+
+function parseSseBlocks(text: string): Array<{ event?: string; data?: string }> {
+  const blocks = text.split(/\n\n+/g)
+  const out: Array<{ event?: string; data?: string }> = []
+  for (const b of blocks) {
+    const lines = b.split(/\n/g)
+    let event: string | undefined
+    const dataLines: string[] = []
+    for (const line of lines) {
+      const m1 = line.match(/^event:\s*(.*)$/)
+      if (m1) {
+        event = (m1[1] ?? '').trim()
+        continue
+      }
+      const m2 = line.match(/^data:\s*(.*)$/)
+      if (m2) {
+        dataLines.push(m2[1] ?? '')
+        continue
+      }
+    }
+    if (event || dataLines.length) out.push({ event, data: dataLines.join('\n') })
+  }
+  return out
+}
+
+export async function requestAgentChatStream(
+  conversationId: string | null,
+  message: string,
+  onEvent: (ev: AgentSseEvent) => void,
+): Promise<void> {
+  const r = await fetch('/api/saw/agent/chat?stream=1', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: conversationId, message }),
+  })
+
+  if (!r.ok) {
+    const t = await r.text()
+    throw new Error(`Agent chat stream request failed: ${t}`)
+  }
+
+  const reader = r.body?.getReader()
+  if (!reader) throw new Error('Agent chat stream unavailable (no body)')
+
+  const decoder = new TextDecoder()
+  let buf = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+
+    // Process complete SSE blocks; keep remainder in buf.
+    const lastSep = buf.lastIndexOf('\n\n')
+    if (lastSep < 0) continue
+    const head = buf.slice(0, lastSep)
+    buf = buf.slice(lastSep + 2)
+
+    for (const block of parseSseBlocks(head)) {
+      if (!block.data) continue
+      // SAW uses a single event name (saw.agent.event); the typed payload is in JSON data.
+      try {
+        const ev = JSON.parse(block.data) as AgentSseEvent
+        if (ev && typeof ev.type === 'string') onEvent(ev)
+      } catch {
+        // ignore malformed blocks
+      }
+    }
+  }
 }
 
 
