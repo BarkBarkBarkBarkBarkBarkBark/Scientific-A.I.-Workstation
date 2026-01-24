@@ -1,0 +1,477 @@
+saw_migration_spec_version: "0.2"
+id: "saw-copilot-sdk-migration"
+created_at: "2026-01-23"
+project:
+  name: "Scientific AI Workstation (SAW)"
+  repo: "BarkBarkBarkBarkBarkBarkBark/Scientific-A.I.-Workstation"
+  core_principles:
+    - local_first
+    - human_in_the_loop
+    - patch_only_edits
+    - deterministic_rollback
+    - least_privilege
+    - no_silent_writes
+
+migration_intent:
+  from:
+    provider: "openai_api_direct"
+    usage:
+      - "SAW chat panel"
+      - "doc ingestion + embeddings (pgvector)"
+      - "agent proposes diffs to patch engine"
+  to:
+    provider: "github_copilot_sdk"
+    runtime_model: "copilot_cli_jsonrpc"
+    goals:
+      - "Copilot SDK becomes the primary 'brains' for the SAW chat panel"
+      - "Copilot runs in its own Python server (sidecar) so UI crashes don't kill the agent"
+      - "Preserve Cursor/VSCode-style approve/reject diff workflow (all writes gated)"
+      - "Keep OpenAI key available for embeddings and optional fallback"
+
+assumptions:
+  - "Copilot CLI is installed and available on PATH as `copilot`"
+  - "User has a GitHub Copilot subscription or equivalent access via Copilot CLI"
+  - "Existing SAW patch engine already gates writes via UI approval (applyPatch/safe_write)"
+  - "Existing SAW API is FastAPI/uvicorn and frontend is React/Vite"
+  - "OpenAI API remains configured for embeddings/retrieval until explicitly migrated"
+
+non_goals:
+  - "Migrate embeddings/vectorization off OpenAI in this change"
+  - "Production-grade hardening of Copilot SDK (technical preview caveats accepted)"
+  - "Rewrite SAW plugin runtime beyond required tool hooks"
+
+target_architecture:
+  processes:
+    - name: "saw_shell"
+      type: "frontend"
+      tech: ["react", "typescript", "vite"]
+      crash_characteristic: "may crash/reload; must not brick agent"
+    - name: "saw_api"
+      type: "backend"
+      tech: ["python", "fastapi", "uvicorn"]
+      role: "stable API, patch-gatekeeper, job runner, db access"
+    - name: "saw_copilotd"
+      type: "agent_sidecar"
+      tech: ["python", "fastapi", "uvicorn", "github_copilot_sdk"]
+      role: "Copilot SDK client + session manager + tool policy enforcement + streaming"
+    - name: "postgres_pgvector"
+      type: "database"
+      role: "documents, embeddings, sessions/audit logs (if desired)"
+    - name: "saw_watchdog"
+      type: "optional_sidecar"
+      tech: ["python"]
+      role: "healthcheck + crash detection + recovery window opener"
+
+  dataflows:
+    chat_primary:
+      - "frontend(chat_ui) -> saw_api(/v1/chat/*) -> saw_copilotd(/v1/sessions/*) -> copilot_cli(JSON-RPC) -> stream events -> frontend"
+    patch_write_gate:
+      - "copilot -> tool:saw.propose_patch -> saw_api(patch_engine.validate_dry_run) -> frontend(diff_view) -> user approve/reject"
+      - "if approve: saw_api(patch_engine.apply + git_commit + trigger_reindex)"
+      - "if reject: saw_api records reason -> saw_copilotd feeds rejection context back to session"
+    crash_recovery:
+      - "watchdog detects frontend crash or saw_api unhealthy -> opens recovery UI route"
+      - "recovery UI talks to saw_copilotd (agent stays up) -> can diagnose + propose rollback"
+      - "rollback still requires user approval -> saw_api executes rollback via git"
+
+service_contracts:
+  saw_copilotd:
+    bind:
+      host: "127.0.0.1"
+      port: 9041
+    health:
+      path: "/healthz"
+    endpoints:
+      - method: "POST"
+        path: "/v1/sessions"
+        purpose: "create copilot session"
+        request_schema:
+          workspace_root: "string"
+          model: "string|null"
+          mode: "string" # "safe" | "yolo"
+          metadata: "object|null"
+        response_schema:
+          session_id: "string"
+          model: "string"
+      - method: "POST"
+        path: "/v1/sessions/{session_id}/messages"
+        purpose: "send a user message into the copilot session"
+        request_schema:
+          message_id: "string"
+          role: "string" # "user" | "system"
+          content: "string"
+          context:
+            active_repo_root: "string"
+            selection: "object|null"
+            open_files: "array|null"
+      - method: "GET"
+        path: "/v1/sessions/{session_id}/events"
+        purpose: "SSE stream of tokens + tool calls + patch proposals"
+        response_schema:
+          sse_events:
+            - "token"
+            - "tool_call"
+            - "tool_result"
+            - "patch_proposal"
+            - "warning"
+            - "error"
+      - method: "POST"
+        path: "/v1/sessions/{session_id}/feedback"
+        purpose: "send accept/reject reasoning back to copilot"
+        request_schema:
+          type: "string" # "patch_accepted" | "patch_rejected" | "rollback_accepted" | "rollback_rejected"
+          details: "object"
+      - method: "POST"
+        path: "/v1/crash-report"
+        purpose: "optional hook: frontend/backend crash metadata for agent diagnosis"
+        request_schema:
+          component: "string"
+          timestamp: "string"
+          last_actions: "array|null"
+          stack: "string|null"
+          logs_tail: "string|null"
+
+  saw_api_changes:
+    new_or_updated_endpoints:
+      - method: "POST"
+        path: "/v1/chat/send"
+        purpose: "frontend entrypoint; proxies to saw_copilotd and returns streaming channel info"
+      - method: "GET"
+        path: "/v1/chat/stream/{session_id}"
+        purpose: "proxy SSE from saw_copilotd (preferred; keeps frontend talking to one backend)"
+      - method: "POST"
+        path: "/v1/patches/proposals"
+        purpose: "create proposal record from copilot tool call (no write yet)"
+      - method: "POST"
+        path: "/v1/patches/proposals/{proposal_id}/approve"
+        purpose: "apply patch + run checks + commit + return outcome"
+      - method: "POST"
+        path: "/v1/patches/proposals/{proposal_id}/reject"
+        purpose: "reject patch with reason"
+      - method: "POST"
+        path: "/v1/recovery/rollback"
+        purpose: "rollback to commit/tag with approval + audit"
+      - method: "GET"
+        path: "/v1/recovery/status"
+        purpose: "last known good commit + last applied proposals + health summary"
+
+provider_abstraction:
+  intent: "avoid hard-coding any single agent provider in saw_api"
+  interface:
+    name: "AgentProvider"
+    methods:
+      - "create_session(workspace_root, model, mode, metadata) -> session_id"
+      - "send_message(session_id, role, content, context) -> stream_handle"
+      - "stream_events(session_id) -> SSE"
+      - "send_feedback(session_id, feedback_type, details) -> void"
+  implementations:
+    - name: "CopilotSDKProvider"
+      location: "saw_api talks to saw_copilotd over HTTP"
+      default: true
+    - name: "OpenAIProvider"
+      location: "existing OpenAI calls"
+      default: false
+      note: "kept for fallback/debug; also used for embeddings until migrated"
+
+tooling_and_guardrails:
+  invariant: "NO FILE WRITES WITHOUT UI APPROVAL"
+  copilot_tool_policy:
+    mode_defaults:
+      safe:
+        allow:
+          - "read_only_repo_tools"
+          - "search_tools"
+          - "structured_reasoning_tools"
+          - "propose_patch_only"
+        deny:
+          - "direct_filesystem_write"
+          - "direct_git_commit"
+          - "destructive_shell"
+      yolo:
+        allow:
+          - "read_only_repo_tools"
+          - "search_tools"
+          - "run_non_destructive_shell"
+          - "propose_patch_only"
+        deny:
+          - "direct_filesystem_write"
+          - "direct_git_commit"
+          - "network_exfiltration_tools"
+    enforcement_layers:
+      - "configure Copilot SDK to disable/withhold first-party write tools when possible"
+      - "wrap/override tools so that any attempted write becomes propose_patch"
+      - "server-side validation in saw_api patch engine is final authority"
+  custom_tools_exposed_to_copilot:
+    - name: "saw.list_dir"
+      purpose: "directory listing under workspace_root"
+      side_effects: "none"
+      constraints:
+        root_locked: true
+        deny_paths:
+          - ".git"
+          - "node_modules"
+          - ".venv"
+          - "**/__pycache__/**"
+    - name: "saw.read_file"
+      purpose: "read file contents (bounded)"
+      side_effects: "none"
+      constraints:
+        max_bytes: 200000
+    - name: "saw.search_text"
+      purpose: "ripgrep-like search"
+      side_effects: "none"
+      constraints:
+        max_hits: 200
+    - name: "saw.repo_snapshot"
+      purpose: "summarize repo structure + key entrypoints + recent commits"
+      side_effects: "none"
+    - name: "saw.git_status"
+      purpose: "return git status + current branch + last commit"
+      side_effects: "none"
+    - name: "saw.run_checks"
+      purpose: "run configured checks (lint/unit) in a controlled way"
+      side_effects: "bounded"
+      constraints:
+        allowlist_commands:
+          - "uv run -m pytest"
+          - "npm test"
+          - "npm run lint"
+          - "uv run ruff check"
+    - name: "saw.propose_patch"
+      purpose: "submit a unified diff proposal (no write) for review"
+      side_effects: "none"
+      request_schema:
+        title: "string"
+        summary: "string"
+        unified_diff: "string"
+        touched_files: "array"
+        risk_level: "string" # "low"|"medium"|"high"
+        suggested_checks: "array"
+      response_schema:
+        proposal_id: "string"
+        dry_run_result: "object"
+    - name: "saw.rollback_plan"
+      purpose: "propose rollback steps (no action)"
+      side_effects: "none"
+    - name: "saw.request_rollback"
+      purpose: "create rollback request (approval required)"
+      side_effects: "none"
+
+patch_engine_requirements:
+  validate_before_apply:
+    - "patch parses cleanly (unified diff)"
+    - "paths are within workspace_root allowlist"
+    - "denylist enforced (.env, secrets, keychains, credentials)"
+    - "max files touched and max diff size enforced"
+    - "dry-run apply in temp checkout or git worktree"
+  apply_flow:
+    steps:
+      - "create git checkpoint commit/tag: saw/checkpoint/<timestamp>"
+      - "apply patch"
+      - "run suggested checks (optional but recommended)"
+      - "if checks fail: auto-rollback to checkpoint; mark proposal failed"
+      - "if pass: commit with message: 'saw: <proposal_title>'"
+  audit_log:
+    store:
+      preferred: "postgres"
+      alternative: "local sqlite/jsonl"
+    record_fields:
+      - "proposal_id"
+      - "timestamp"
+      - "session_id"
+      - "user_approval"
+      - "files_touched"
+      - "checks_run"
+      - "result"
+      - "rollback_performed"
+      - "diff_hash"
+
+crash_recovery_spec:
+  detection:
+    mechanisms:
+      - "frontend heartbeat (websocket/ping) to saw_api"
+      - "watchdog polls saw_api(/healthz) and saw_copilotd(/healthz)"
+      - "detect 'last applied proposal' within crash window"
+  recovery_ui:
+    strategy:
+      - "serve minimal recovery UI at /recovery in existing frontend (or minimal static page served by saw_api)"
+      - "watchdog opens default browser window to http://127.0.0.1:<saw_api_port>/recovery"
+    capabilities:
+      - "connect to existing copilot session or spawn a new 'recovery' session"
+      - "show last proposals + last checkpoint commit"
+      - "one-click rollback request (still approval gated)"
+      - "export diagnostics bundle (logs, status, recent diffs) for debugging"
+  rollback_mechanisms:
+    preferred:
+      - "git reset --hard <checkpoint_commit> (local-only; simplest)"
+    safer_alternative:
+      - "git revert <bad_commit_range> (preserves history)"
+    approval:
+      required: true
+      ui_copy: "Rollback requires explicit approval. This will discard/undo recent changes."
+
+implementation_plan:
+  phases:
+    - name: "P0_provider_interface"
+      outcomes:
+        - "Introduce AgentProvider interface in saw_api"
+        - "Keep OpenAIProvider working (no behavior change yet)"
+      files:
+        create:
+          - "services/saw_api/app/agent/providers/base.py"
+          - "services/saw_api/app/agent/providers/openai_provider.py"
+        modify:
+          - "services/saw_api/app/main.py"
+          - "services/saw_api/app/routes/chat.py"
+    - name: "P1_saw_copilotd_sidecar"
+      outcomes:
+        - "Add new FastAPI service that wraps Copilot SDK and streams events"
+        - "Run via uv; simple /healthz and session endpoints"
+      files:
+        create:
+          - "services/saw_copilotd/pyproject.toml"
+          - "services/saw_copilotd/app/main.py"
+          - "services/saw_copilotd/app/copilot/client.py"
+          - "services/saw_copilotd/app/copilot/session_manager.py"
+          - "services/saw_copilotd/app/tools/registry.py"
+          - "services/saw_copilotd/app/tools/policy.py"
+          - "services/saw_copilotd/.env.example"
+    - name: "P2_wire_chat_to_copilot"
+      outcomes:
+        - "Frontend chat panel uses saw_api chat endpoints"
+        - "saw_api uses CopilotSDKProvider (HTTP proxy to saw_copilotd)"
+        - "Streaming tokens in UI"
+      files:
+        modify:
+          - "services/saw_api/app/routes/chat.py"
+          - "frontend/src/components/Chat/*"
+          - "frontend/src/api/*"
+    - name: "P3_patch_proposals_first"
+      outcomes:
+        - "Copilot can only propose patches via saw.propose_patch tool"
+        - "saw_api validates + stores proposals"
+        - "UI shows diff with Approve/Reject"
+        - "Approve applies patch via patch engine and commits"
+      files:
+        create:
+          - "services/saw_api/app/routes/patches.py"
+          - "services/saw_api/app/patch_engine/validation.py"
+          - "services/saw_api/app/patch_engine/audit.py"
+        modify:
+          - "frontend/src/components/DiffViewer/*"
+          - "frontend/src/components/Chat/ToolEventsPanel/*"
+    - name: "P4_crash_recovery"
+      outcomes:
+        - "Watchdog opens /recovery window when crash/unhealthy"
+        - "Rollback request path works with approval"
+      files:
+        create:
+          - "services/saw_watchdog/pyproject.toml"
+          - "services/saw_watchdog/main.py"
+          - "services/saw_api/app/routes/recovery.py"
+        modify:
+          - "frontend/src/routes/recovery.tsx"
+          - "scripts/run_mvp.sh (or equivalent) to start watchdog + copilotd"
+
+uv_install_and_run:
+  prerequisites:
+    - "uv installed"
+    - "copilot CLI installed and authenticated"
+  workspace_conventions:
+    workspace_root_env: "SAW_WORKSPACE_ROOT"
+    services_root: "services/"
+  commands:
+    - cwd: "services/saw_copilotd"
+      run:
+        - "uv venv"
+        - "uv sync"
+        - "uv run uvicorn app.main:app --host 127.0.0.1 --port 9041"
+    - cwd: "services/saw_api"
+      run:
+        - "uv sync"
+        - "uv run uvicorn app.main:app --host 127.0.0.1 --port 9040"
+  optional_containerization:
+    enabled_default: false
+    use_when:
+      - "you need reproducible dev env across machines"
+      - "you accept extra complexity for filesystem mounts + GUI recovery open"
+    notes:
+      - "If containerized, mount workspace_root read-only; patches still applied by saw_api on host or via a controlled mount"
+
+configuration:
+  env_vars:
+    required:
+      - name: "SAW_WORKSPACE_ROOT"
+        example: "/absolute/path/to/Scientific-A.I.-Workstation"
+      - name: "SAW_API_PORT"
+        example: "9040"
+      - name: "SAW_COPILOTD_PORT"
+        example: "9041"
+      - name: "COPILOT_CLI_PATH"
+        example: "copilot"
+    optional:
+      - name: "OPENAI_API_KEY"
+        purpose: "embeddings + optional fallback provider"
+      - name: "SAW_AGENT_PROVIDER"
+        example: "copilot" # "copilot" | "openai"
+      - name: "SAW_AGENT_MODE_DEFAULT"
+        example: "yolo" # "safe" | "yolo"
+      - name: "SAW_PATCH_MAX_BYTES"
+        example: "500000"
+      - name: "SAW_PATCH_MAX_FILES"
+        example: "25"
+  config_files:
+    - path: ".env.example"
+      add:
+        - "SAW_WORKSPACE_ROOT"
+        - "SAW_API_PORT"
+        - "SAW_COPILOTD_PORT"
+        - "COPILOT_CLI_PATH"
+        - "SAW_AGENT_PROVIDER"
+        - "SAW_AGENT_MODE_DEFAULT"
+    - path: "services/saw_copilotd/.env.example"
+      add:
+        - "SAW_WORKSPACE_ROOT"
+        - "SAW_COPILOTD_PORT"
+        - "COPILOT_CLI_PATH"
+
+future_proof_extensions:
+  model_management:
+    - "Expose available models at runtime (list/select) in UI"
+    - "Per-session model override + 'choose model for step' UX"
+  mcp_support:
+    - "Add MCP registry + connect/disconnect MCP servers per workspace"
+    - "Expose MCP tools to Copilot via controlled allowlist"
+  skills_and_agents:
+    - "SAW skill packs: 'plugin_authoring', 'patch_review', 'db_migrations', 'job_runner_debugger'"
+    - "Specialized recovery agent profile tuned for rollback + diagnostics"
+  memory_and_compaction:
+    - "Persist session history summaries in pgvector"
+    - "Auto-compact long sessions while retaining patch/audit anchors"
+  enterprise_safety:
+    - "Secret scanning before apply (deny if secrets detected)"
+    - "Network egress deny by default; explicit opt-in per tool"
+    - "Signed patch approvals (user + timestamp + hash)"
+
+acceptance_criteria:
+  functional:
+    - "SAW chat panel responses are generated via Copilot SDK (streaming tokens visible)"
+    - "Copilot can call tools and produce patch proposals, but cannot write directly"
+    - "Diff approval UI shows unified diff; approve applies patch + commits; reject returns rationale to agent"
+    - "On induced frontend crash, recovery UI opens and can guide rollback; rollback requires approval"
+  regression:
+    - "OpenAI embeddings/doc ingestion continues to work unchanged"
+    - "Patch engine remains the only write path"
+  observability:
+    - "Audit log records every proposal + approval + apply + rollback"
+    - "Health endpoints report readiness for saw_api and saw_copilotd"
+
+deliverables_checklist:
+  new_services:
+    - "services/saw_copilotd (FastAPI + Copilot SDK wrapper)"
+    - "services/saw_watchdog (optional, recommended)"
+  modified_services:
+    - "services/saw_api (provider abstraction + proxy + patch proposal endpoints)"
+    - "frontend chat UI (streaming + tool events + diff approval + recovery route)"
+  scripts:
+    - "one-command dev runner starts: postgres (if needed) + saw_api + saw_copilotd + frontend + watchdog"

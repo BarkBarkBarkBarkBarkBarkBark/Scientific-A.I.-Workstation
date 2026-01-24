@@ -142,7 +142,8 @@ dependencies = [
     "wrapt==2.0.1",
     "xyzservices==2025.11.0",
     "zarr==2.18.7",
-    "pip"
+    "pip",
+    "github-copilot-sdk",
 ]
 
 [tool.uv.workspace]
@@ -152,3 +153,4 @@ members = [
 
 [tool.uv.sources]
 sorting-scripts = { workspace = true }
+github-copilot-sdk = { git = "https://github.com/github/copilot-sdk.git", subdirectory = "python" }

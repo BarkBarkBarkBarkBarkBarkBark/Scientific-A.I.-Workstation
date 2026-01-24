@@ -8,7 +8,7 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "scientific-a-i-workstation",
+    "scientific-ai-workstation",
     "sorting-scripts",
 ]
 
@@ -572,6 +572,16 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d5/7d/5df2650c57d47c57232af5ef4b4fdbff182070421e405e0d62c6cdbfaa87/fsspec-2026.1.0.tar.gz", hash = "sha256:e987cb0496a0d81bba3a9d1cee62922fb395e7d4c3b575e57f547953334fe07b", size = 310496, upload-time = "2026-01-09T15:21:35.562Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/01/c9/97cc5aae1648dcb851958a3ddf73ccd7dbe5650d95203ecb4d7720b4cdbf/fsspec-2026.1.0-py3-none-any.whl", hash = "sha256:cb76aa913c2285a3b49bdd5fc55b1d7c708d7208126b60f2eb8194fe1b4cbdcc", size = 201838, upload-time = "2026-01-09T15:21:34.041Z" },
+]
+
+[[package]]
+name = "github-copilot-sdk"
+version = "0.1.0"
+source = { git = "https://github.com/github/copilot-sdk.git?subdirectory=python#0f4ed59124d88d2cd2f16cc533533822bfb01f11" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
 ]
 
 [[package]]
@@ -1795,6 +1805,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pip"
+version = "25.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/6e/74a3f0179a4a73a53d66ce57fdb4de0080a8baa1de0063de206d6167acc2/pip-25.3.tar.gz", hash = "sha256:8d0538dbbd7babbd207f261ed969c65de439f6bc9e5dbd3b3b9a77f25d95f343", size = 1803014, upload-time = "2025-10-25T00:55:41.394Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/3c/d717024885424591d5376220b5e836c2d5293ce2011523c9de23ff7bf068/pip-25.3-py3-none-any.whl", hash = "sha256:9655943313a94722b7774661c21049070f6bbb0a1516bf02f7c8d5d9201514cd", size = 1778622, upload-time = "2025-10-25T00:55:39.247Z" },
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2298,7 +2317,7 @@ wheels = [
 ]
 
 [[package]]
-name = "scientific-a-i-workstation"
+name = "scientific-ai-workstation"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
@@ -2330,6 +2349,7 @@ dependencies = [
     { name = "filelock" },
     { name = "fonttools" },
     { name = "fsspec" },
+    { name = "github-copilot-sdk" },
     { name = "h11" },
     { name = "h5py" },
     { name = "hdmf" },
@@ -2382,6 +2402,7 @@ dependencies = [
     { name = "pexpect" },
     { name = "pgvector" },
     { name = "pillow" },
+    { name = "pip" },
     { name = "platformdirs" },
     { name = "pluggy" },
     { name = "prettytable" },
@@ -2473,6 +2494,7 @@ requires-dist = [
     { name = "filelock", specifier = "==3.20.3" },
     { name = "fonttools", specifier = "==4.61.1" },
     { name = "fsspec", specifier = "==2026.1.0" },
+    { name = "github-copilot-sdk", git = "https://github.com/github/copilot-sdk.git?subdirectory=python" },
     { name = "h11", specifier = "==0.16.0" },
     { name = "h5py", specifier = "==3.15.1" },
     { name = "hdmf", specifier = "==4.2.0" },
@@ -2525,6 +2547,7 @@ requires-dist = [
     { name = "pexpect", specifier = "==4.9.0" },
     { name = "pgvector", specifier = "==0.3.6" },
     { name = "pillow", specifier = "==12.1.0" },
+    { name = "pip" },
     { name = "platformdirs", specifier = "==4.5.1" },
     { name = "pluggy", specifier = "==1.6.0" },
     { name = "prettytable", specifier = "==3.17.0" },
