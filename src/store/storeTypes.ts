@@ -32,6 +32,9 @@ export type SawState = {
     rightCollapsed: boolean
     bottomHeight: number
 
+    // Bottom console split view
+    bottomChatWidth: number
+
     // Additional resizable panes
     patchReviewFilesWidth: number
     pluginBuilderSettingsWidth: number

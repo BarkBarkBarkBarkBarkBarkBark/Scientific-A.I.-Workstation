@@ -11,6 +11,8 @@ import { PipelineBuilder } from './components/PipelineBuilder'
 import { ModuleFullscreenModal } from './components/ModuleFullscreenModal'
 import { ConsoleFullscreenModal } from './components/ConsoleFullscreenModal'
 import { PatchReviewModal } from './components/PatchReviewModal'
+import { Panel } from './components/ui/Panel'
+import { ChatPanel } from './components/ChatPanel'
 
 export function App() {
   const refreshAiStatus = useSawStore((s) => s.refreshAiStatus)
@@ -26,6 +28,8 @@ export function App() {
         rightCollapsed: false,
         bottomHeight: 240,
 
+        bottomChatWidth: 520,
+
         patchReviewFilesWidth: 320,
         pluginBuilderSettingsWidth: 420,
         moduleFullscreenLeftWidth: 760,
@@ -37,6 +41,8 @@ export function App() {
   const layoutMode = useSawStore((s) => s.layoutMode)
   const deleteSelectedNode = useSawStore((s) => s.deleteSelectedNode)
   const [vh, setVh] = useState(() => (typeof window === 'undefined' ? 900 : window.innerHeight))
+  const clearChat = useSawStore((s) => s.clearChat)
+  const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1400 : window.innerWidth))
 
   useEffect(() => {
     void refreshAiStatus()
@@ -45,6 +51,12 @@ export function App() {
 
   useEffect(() => {
     const onResize = () => setVh(window.innerHeight)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth)
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
@@ -68,70 +80,105 @@ export function App() {
 
   return (
     <div className="h-full bg-zinc-950 font-ui text-zinc-100">
-      {/*
-        Max bottom height is basically "almost full screen".
-        (Top bar + goal box + paddings leave ~160px.)
-      */}
-      {/**/}
-      <div
-        className="grid h-full gap-0"
-        style={{ gridTemplateRows: `48px auto 1fr 12px ${layout.bottomHeight}px` }}
-      >
-        <TopBar />
-        <GoalBox />
+      <div className="flex h-full min-h-0">
+        <div className="min-w-0 flex-1">
+          {/*
+            Max bottom height is basically "almost full screen".
+            (Top bar + goal box + paddings leave ~160px.)
+          */}
+          <div className="grid h-full gap-0" style={{ gridTemplateRows: `48px auto 1fr 12px ${layout.bottomHeight}px` }}>
+            <TopBar />
+            <GoalBox />
 
-        <div className="min-h-0 px-2 py-2">
-          <div
-            className="grid h-full min-h-0 gap-2"
-            style={{
-              gridTemplateColumns: `${layout.leftWidth}px 12px 1fr 12px ${layout.rightWidth}px`,
-            }}
-          >
-            <PluginBrowser />
+            <div className="min-h-0 px-2 py-2">
+              <div
+                className="grid h-full min-h-0 gap-2"
+                style={{
+                  gridTemplateColumns: `${layout.leftWidth}px 12px 1fr 12px ${layout.rightWidth}px`,
+                }}
+              >
+                <PluginBrowser />
 
-            <div className="h-full">
+                <div className="h-full">
+                  <ResizableDivider
+                    orientation="vertical"
+                    value={layout.leftWidth}
+                    setValue={(v) => setLayout({ leftWidth: v })}
+                    min={layout.leftCollapsed ? 56 : 220}
+                    max={layout.leftCollapsed ? 56 : 520}
+                  />
+                </div>
+
+                {layoutMode === 'pipeline' ? <PipelineBuilder /> : <NodeCanvas />}
+
+                <div className="h-full">
+                  <ResizableDivider
+                    orientation="vertical"
+                    value={layout.rightWidth}
+                    setValue={(v) => setLayout({ rightWidth: v })}
+                    invert
+                    min={layout.rightCollapsed ? 56 : 260}
+                    max={layout.rightCollapsed ? 56 : 560}
+                  />
+                </div>
+
+                <Inspector />
+              </div>
+            </div>
+
+            <div className="mx-2">
               <ResizableDivider
-                orientation="vertical"
-                value={layout.leftWidth}
-                setValue={(v) => setLayout({ leftWidth: v })}
-                min={layout.leftCollapsed ? 56 : 220}
-                max={layout.leftCollapsed ? 56 : 520}
+                orientation="horizontal"
+                value={layout.bottomHeight}
+                setValue={(v) => setLayout({ bottomHeight: v })}
+                invert
+                min={160}
+                max={Math.max(200, vh - 160)}
               />
             </div>
 
-            {layoutMode === 'pipeline' ? <PipelineBuilder /> : <NodeCanvas />}
-
-            <div className="h-full">
-              <ResizableDivider
-                orientation="vertical"
-                value={layout.rightWidth}
-                setValue={(v) => setLayout({ rightWidth: v })}
-                min={layout.rightCollapsed ? 56 : 260}
-                max={layout.rightCollapsed ? 56 : 560}
-              />
-            </div>
-
-            <Inspector />
+            <BottomPanel />
           </div>
+
+          <ModuleFullscreenModal />
+          <ConsoleFullscreenModal />
+          <PatchReviewModal />
         </div>
 
-        <div className="mx-2">
+        <div className="h-full w-[12px]">
           <ResizableDivider
-            orientation="horizontal"
-            value={layout.bottomHeight}
-            setValue={(v) => setLayout({ bottomHeight: v })}
+            orientation="vertical"
+            value={layout.bottomChatWidth}
+            setValue={(v) => setLayout({ bottomChatWidth: v })}
             invert
-            min={160}
-            max={Math.max(200, vh - 160)}
+            min={360}
+            max={Math.max(420, vw - 720)}
           />
         </div>
 
-        <BottomPanel />
+        <div className="min-h-0" style={{ width: layout.bottomChatWidth }}>
+          <Panel
+            title="Chat"
+            right={
+              <button
+                type="button"
+                onClick={clearChat}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+                title="Clear chat messages"
+              >
+                Clear
+              </button>
+            }
+            className="h-full overflow-hidden"
+          >
+            <div className="h-full min-h-0 overflow-hidden p-2">
+              <div className="h-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950/40">
+                <ChatPanel />
+              </div>
+            </div>
+          </Panel>
+        </div>
       </div>
-
-      <ModuleFullscreenModal />
-      <ConsoleFullscreenModal />
-      <PatchReviewModal />
     </div>
   )
 }

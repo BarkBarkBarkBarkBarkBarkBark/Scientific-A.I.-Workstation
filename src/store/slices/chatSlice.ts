@@ -29,6 +29,35 @@ function saveProvider(p: AgentProvider) {
   }
 }
 
+function buildUiContextForAgent(state: SawState): string {
+  const selectedNode = state.nodes.find((n) => n.id === state.selectedNodeId) ?? null
+  const selectedPluginId = selectedNode?.data?.pluginId ?? null
+  const selectedPlugin = selectedPluginId
+    ? state.pluginCatalog.find((p) => p.id === selectedPluginId) ?? null
+    : null
+
+  const lines: string[] = []
+  lines.push('SAW_UI_CONTEXT (ephemeral; do not echo verbatim)')
+  lines.push(`layoutMode: ${state.layoutMode}`)
+  lines.push(`editableMode: ${state.editableMode ? 'ON' : 'OFF'}`)
+  lines.push(`selectedNodeId: ${state.selectedNodeId ?? 'none'}`)
+  if (selectedNode) {
+    lines.push(`selectedNode.pluginId: ${String(selectedPluginId ?? '')}`)
+  }
+  if (selectedPlugin) {
+    lines.push(`selectedPlugin.name: ${selectedPlugin.name}`)
+    if (selectedPlugin.ui?.mode) lines.push(`selectedPlugin.ui.mode: ${selectedPlugin.ui.mode}`)
+  }
+  lines.push(`fullscreen.open: ${state.fullscreen?.open ? 'true' : 'false'}`)
+  lines.push(`fullscreen.nodeId: ${state.fullscreen?.nodeId ?? 'none'}`)
+  lines.push(`nodes.count: ${state.nodes.length}`)
+  lines.push(`edges.count: ${state.edges.length}`)
+  lines.push(`plugins.catalog.count: ${state.pluginCatalog.length}`)
+  lines.push(`plugins.workspace.count: ${state.workspacePlugins.length}`)
+  lines.push(`dev.attachments.count: ${(state.dev?.attachedPaths ?? []).length}`)
+  return lines.join('\n')
+}
+
 export function createChatSlice(
   set: (partial: Partial<SawState> | ((s: SawState) => Partial<SawState>), replace?: boolean) => void,
   get: () => SawState,
@@ -77,6 +106,9 @@ export function createChatSlice(
     sendChat: async (text: string) => {
       const content = text.trim()
       if (!content) return
+
+      const uiContext = buildUiContextForAgent(get())
+      const messageForAgent = `${uiContext}\n\nUSER_MESSAGE:\n${content}`
 
       set({ chatBusy: true })
       set((s) => ({
@@ -171,14 +203,14 @@ export function createChatSlice(
         const state = get()
         const provider = state.chat.desiredProvider
         // Prefer SSE (works for Copilot mode; OpenAI mode returns a one-shot SSE too).
-        await requestAgentChatStream(state.chat.conversationId, content, provider, applyEvent)
+        await requestAgentChatStream(state.chat.conversationId, messageForAgent, provider, applyEvent)
 
         // If the stream didn't deliver anything, fall back to JSON.
         const after = get()
         const lastAssistant = after.chat.messages[assistantIndex]
         const empty = !lastAssistant || String((lastAssistant as any).content ?? '').trim().length === 0
         if (empty) {
-          const r = await requestAgentChat(after.chat.conversationId, content, after.chat.desiredProvider)
+          const r = await requestAgentChat(after.chat.conversationId, messageForAgent, after.chat.desiredProvider)
           const status = (r as any).status
           const cid = (r as any).conversation_id ?? after.chat.conversationId
           const pending = status === 'needs_approval' ? ((r as any).tool_call ?? null) : null

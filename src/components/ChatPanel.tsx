@@ -92,61 +92,74 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/30 px-2 py-1 text-[11px] text-zinc-400">
-          <div>
-            agent: <span className="font-mono text-zinc-200">{provider || 'unknown'}</span>
-            <span className="text-zinc-700">/</span>
-            selected: <span className="font-mono text-zinc-200">{desiredProvider}</span>
-          </div>
-          <div className="text-zinc-700">•</div>
-          <div className="flex items-center gap-1">
-            use:
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setChatProvider('copilot')}
-              className={[
-                'rounded border px-2 py-1 text-[11px] font-semibold disabled:opacity-50',
-                desiredProvider === 'copilot'
-                  ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
-                  : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
-              ].join(' ')}
-              title="Route the next chat request to Copilot"
-            >
-              Copilot
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setChatProvider('openai')}
-              className={[
-                'rounded border px-2 py-1 text-[11px] font-semibold disabled:opacity-50',
-                desiredProvider === 'openai'
-                  ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
-                  : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
-              ].join(' ')}
-              title="Route the next chat request to OpenAI"
-            >
-              OpenAI
-            </button>
-          </div>
-          <div className="text-zinc-700">•</div>
-          <div>
-            stream: <span className="font-mono text-zinc-200">{streamMode}</span>
-          </div>
-          <div className="text-zinc-700">•</div>
-          <div>
-            openai key:{' '}
-            {openaiEnabled === null ? (
-              <span className="font-mono text-zinc-500">unknown</span>
-            ) : openaiEnabled ? (
-              <span className="font-mono text-emerald-400">configured</span>
-            ) : (
-              <span className="font-mono text-zinc-500">missing</span>
-            )}
+      <div className="px-3 pt-3">
+        <div className="relative mb-3">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-md bg-zinc-950/70 backdrop-blur-md"
+          />
+          <div className="relative flex flex-wrap items-center gap-2 rounded-md border border-zinc-800 bg-transparent px-2 py-1 text-[11px] text-zinc-400">
+            <div>
+              agent: <span className="font-mono text-zinc-200">{provider || 'unknown'}</span>
+              <span className="text-zinc-700">/</span>
+              selected: <span className="font-mono text-zinc-200">{desiredProvider}</span>
+            </div>
+            <div className="text-zinc-700">•</div>
+            <div className="flex items-center gap-1">
+              use:
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setChatProvider('copilot')}
+                className={[
+                  'rounded border px-2 py-1 text-[11px] font-semibold disabled:opacity-50',
+                  desiredProvider === 'copilot'
+                    ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
+                    : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+                ].join(' ')}
+                title="Route the next chat request to Copilot"
+              >
+                Copilot
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setChatProvider('openai')}
+                className={[
+                  'rounded border px-2 py-1 text-[11px] font-semibold disabled:opacity-50',
+                  desiredProvider === 'openai'
+                    ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
+                    : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+                ].join(' ')}
+                title="Route the next chat request to OpenAI"
+              >
+                OpenAI
+              </button>
+            </div>
+            <div className="text-zinc-700">•</div>
+            <div>
+              stream: <span className="font-mono text-zinc-200">{streamMode}</span>
+            </div>
+            <div className="text-zinc-700">•</div>
+            <div>
+              openai key:{' '}
+              {openaiEnabled === null ? (
+                <span className="font-mono text-zinc-500">unknown</span>
+              ) : openaiEnabled ? (
+                <span className="font-mono text-emerald-400">configured</span>
+              ) : (
+                <span className="font-mono text-zinc-500">missing</span>
+              )}
+            </div>
           </div>
         </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+        <div
+          aria-hidden
+          className="pointer-events-none sticky top-0 z-10 -mx-3 h-6 bg-gradient-to-b from-zinc-950/90 to-transparent backdrop-blur"
+        />
 
         {lastForbidden?.path && (
           <div className="mb-3 rounded-md border border-amber-900/40 bg-amber-950/20 p-2 text-[11px] text-amber-100">

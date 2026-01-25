@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
 import { DeveloperPanel } from './DeveloperPanel'
-import { ChatPanel } from './ChatPanel'
 import { TodoPanel } from './TodoPanel'
 
 function TabButton(props: { active: boolean; onClick: () => void; children: string }) {
@@ -27,7 +26,6 @@ export function ConsoleFullscreenModal() {
   const close = useSawStore((s) => s.closeConsoleFullscreen)
   const tab = useSawStore((s) => s.bottomTab)
   const setTab = useSawStore((s) => s.setBottomTab)
-  const clearChat = useSawStore((s) => s.clearChat)
   const logs = useSawStore((s) => s.logs)
   const errors = useSawStore((s) => s.errors)
   const ai = useSawStore((s) => s.aiMessages)
@@ -61,19 +59,6 @@ export function ConsoleFullscreenModal() {
               <TabButton active={tab === 'ai'} onClick={() => setTab('ai')}>
                 AI Suggestions
               </TabButton>
-              <TabButton active={tab === 'chat'} onClick={() => setTab('chat')}>
-                Chat
-              </TabButton>
-              {tab === 'chat' && (
-                <button
-                  type="button"
-                  onClick={clearChat}
-                  className="ml-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
-                  title="Clear chat messages"
-                >
-                  Clear
-                </button>
-              )}
               <TabButton active={tab === 'todo'} onClick={() => setTab('todo')}>
                 Todo
               </TabButton>
@@ -92,21 +77,21 @@ export function ConsoleFullscreenModal() {
         }
         className="h-full overflow-hidden"
       >
-        {tab === 'dev' ? (
-          <div className="h-full p-2">
-            <DeveloperPanel />
-          </div>
-        ) : tab === 'todo' ? (
-          <TodoPanel />
-        ) : tab === 'chat' ? (
-          <ChatPanel />
-        ) : (
-          <div className="h-full overflow-auto p-3">
-            <pre className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-zinc-200">
-              {content.join('\n')}
-            </pre>
-          </div>
-        )}
+        <div className="h-full min-h-0 p-2">
+          {tab === 'dev' ? (
+            <div className="h-full p-0">
+              <DeveloperPanel />
+            </div>
+          ) : tab === 'todo' ? (
+            <TodoPanel />
+          ) : (
+            <div className="h-full overflow-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
+              <pre className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-zinc-200">
+                {content.join('\n')}
+              </pre>
+            </div>
+          )}
+        </div>
       </Panel>
     </div>
   )

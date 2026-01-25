@@ -87,8 +87,7 @@ export function Inspector() {
             {steps.map((s) => {
               const stepNum = s.idx + 1
               const outs = s.plugin?.outputs ?? []
-              const statusBadge =
-                s.lastOk == null ? '—' : s.lastOk ? 'ok' : 'error'
+              const statusBadge = s.lastOk == null ? '—' : s.lastOk ? 'ok' : 'error'
 
               return (
                 <div key={s.node.id} className="rounded-md border border-zinc-800 bg-zinc-950/30 p-3">

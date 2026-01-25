@@ -1,0 +1,111 @@
+saw_spec_version: "0.1"
+kind: "ui_feature_spec"
+id: "module_fullscreen.app_pane"
+name: "Module Fullscreen: App Pane"
+status: "proposed"
+created_at: "2026-01-25"
+
+summary:
+  goal: "Add an 'App' pane option in Module Fullscreen to render a plugin UI bundle as a first-class, beautiful UI view (no raw JSON/CSV/code shown)."
+  non_goals:
+    - "Do not change plugin execution semantics (still uses existing /plugins/execute)."
+    - "Do not introduce new pages/routes; only add a new pane option within the existing Module Fullscreen modal."
+    - "Do not expand the sandbox surface beyond the existing server policy for bundle UI."
+
+context:
+  existing_fullscreen_modal:
+    component: "src/components/ModuleFullscreenModal.tsx"
+    current_code_panes: ["Manifest (YAML)", "Wrapper (Python)", "Directory"]
+  existing_plugin_ui_modes:
+    - mode: "schema"
+      frontend_component: "src/components/plugin_ui/SchemaPluginUi.tsx"
+      backend_endpoint: "GET /plugins/ui/schema/{plugin_id}"
+    - mode: "bundle"
+      frontend_component: "src/components/plugin_ui/BundlePluginUi.tsx"
+      backend_endpoint: "GET /plugins/ui/bundle/{plugin_id}"
+
+user_story:
+  - "As a user, when I open a module in fullscreen, I can switch to an 'App' pane so the plugin's UI renders like an application view (not as code/text)."
+  - "As a user, I never need to read JS/HTML/JSON to use a plugin UI; the UI renders as React/HTML output inside the app shell."
+
+ux_spec:
+  location: "Module Fullscreen modal, inside the right-hand 'Code' panel tab row"
+  new_pane:
+    id: "app"
+    label: "App"
+    availability_rules:
+      - "Shown only when the selected plugin has ui.mode == 'bundle'."
+      - "Hidden for ui.mode == 'schema' (schema UI already renders in the left 'Module' pane)."
+      - "Hidden when plugin is not a workspace/discovered plugin (no manifest/wrapper paths)."
+    behavior:
+      - "Selecting 'App' renders the plugin UI bundle (the same bundle served by GET /plugins/ui/bundle/{plugin_id})."
+      - "If the bundle cannot be loaded or fails to render, show a short human-readable error plus a fallback UI (the existing default module UI)."
+    layout_constraints:
+      - "App pane must be scroll-safe and must not break the modal layout; it should reuse existing Panel shells and sizing patterns."
+      - "No new colors/tokens; reuse existing Tailwind classes and app design primitives."
+
+plugin_contract:
+  manifest_fields:
+    ui:
+      mode: "bundle"
+      bundle_file_default: "ui/ui.bundle.js"
+      bundle_file_description: "Workspace-relative path under the plugin directory. This points to a prebuilt JS bundle evaluated by the frontend."
+      sandbox:
+        description: "When true, bundle mode is restricted to non-stock (workspace/dev) plugins."
+        default: true
+  bundle_exports:
+    required:
+      - "module.exports.render(props) or module.exports.default(props)"
+    props_shape:
+      nodeId: "string"
+      plugin: "PluginDefinition"
+      api:
+        description: "Small, explicit surface area provided by host"
+        includes:
+          - "React"
+          - "h (React.createElement)"
+          - "Fragment"
+          - "useState, useEffect, useMemo"
+          - "useSawStore"
+          - "fetchDevTree, fetchDevFile"
+          - "fetch"
+          - "console"
+      components:
+        includes: ["NodeInputs", "NodeParameters", "NodeRunPanel"]
+
+backend_requirements:
+  endpoints_used:
+    - "GET /plugins/ui/bundle/{plugin_id}"
+  security_policy_alignment:
+    - "Frontend must treat bundle UI as arbitrary JS and rely on the server policy that restricts bundle delivery."
+    - "Server policy (existing):"
+    - "- locked stock plugin + sandbox=true => forbidden"
+    - "- workspace/dev plugin + sandbox=false => forbidden"
+    - "- otherwise => allowed"
+  path_safety:
+    - "Bundle file path is resolved server-side using a safe-join under the plugin directory to prevent traversal."
+
+implementation_plan:
+  steps:
+    - id: "ui.add_tab"
+      description: "Extend ModuleFullscreenModal codeTab union with 'app' and add a new tab button labeled 'App'."
+      files_likely:
+        - "src/components/ModuleFullscreenModal.tsx"
+    - id: "ui.render_app_pane"
+      description: "When codeTab==='app', render BundlePluginUi for the current node/plugin, reusing existing fallback UI."
+      files_likely:
+        - "src/components/ModuleFullscreenModal.tsx"
+    - id: "guardrails"
+      description: "Only show/enable the App tab when plugin.ui.mode==='bundle' and plugin is a workspace plugin."
+      files_likely:
+        - "src/components/ModuleFullscreenModal.tsx"
+
+acceptance_criteria:
+  - "In Module Fullscreen, an 'App' tab appears for bundle-mode workspace plugins."
+  - "Selecting 'App' shows rendered UI (not JS source)."
+  - "If bundle fetch is blocked (403) or missing (404) or render throws, the user sees a concise error and the existing fallback UI."
+  - "No additional routes/pages are introduced."
+
+open_questions:
+  - "Naming: user requested '<plugin>/ui/i.bundle.js' but current convention is 'ui/ui.bundle.js'. Spec assumes manifest-driven 'ui.bundle_file' (can be set to 'ui/i.bundle.js' if desired)."
+  - "Should schema-mode plugins also get an 'App' pane that mirrors the left Module pane? Default: no (keep minimal)."

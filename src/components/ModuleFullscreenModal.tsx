@@ -78,7 +78,7 @@ export function ModuleFullscreenModal() {
     () => (node ? pluginCatalog.find((p) => p.id === node.data.pluginId) ?? null : null),
     [node, pluginCatalog],
   )
-  const [codeTab, setCodeTab] = useState<'source' | 'python' | 'dir'>('source')
+  const [codeTab, setCodeTab] = useState<'source' | 'python' | 'dir' | 'app'>('source')
   const refreshWorkspacePlugins = useSawStore((s) => s.refreshWorkspacePlugins)
   const [forkStatus, setForkStatus] = useState<string>('')
 
@@ -105,6 +105,7 @@ export function ModuleFullscreenModal() {
   const wrapperPath = (plugin?.sourcePaths ?? []).find((p) => p.endsWith('/wrapper.py')) ?? ''
   const isWorkspacePlugin = Boolean(manifestPath && wrapperPath)
   const isLockedStock = Boolean(isWorkspacePlugin && plugin?.locked && plugin?.origin === 'stock')
+  const canShowAppPane = Boolean(isWorkspacePlugin && plugin?.ui?.mode === 'bundle')
   const pluginRoot = useMemo(() => {
     if (!isWorkspacePlugin) return ''
     if (!manifestPath) return ''
@@ -194,7 +195,10 @@ export function ModuleFullscreenModal() {
   )
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/70 p-4">
+    <div
+      className="fixed inset-y-0 left-0 z-[60] bg-black/70 p-4"
+      style={{ right: layout.bottomChatWidth + 12 }}
+    >
       <div className="h-full w-full">
         <Panel
           title={`Fullscreen — ${plugin.name}`}
@@ -238,7 +242,7 @@ export function ModuleFullscreenModal() {
                 value={layout.moduleFullscreenLeftWidth}
                 setValue={(v) => setLayout({ moduleFullscreenLeftWidth: v })}
                 min={360}
-                max={Math.max(520, vw - 520)}
+                max={Math.max(520, vw - layout.bottomChatWidth - 520)}
               />
             </div>
 
@@ -269,6 +273,21 @@ export function ModuleFullscreenModal() {
                   >
                     {isWorkspacePlugin ? 'Wrapper (Python)' : 'Python (fallback)'}
                   </button>
+                  {canShowAppPane ? (
+                    <button
+                      type="button"
+                      onClick={() => setCodeTab('app')}
+                      className={[
+                        'rounded-md px-3 py-1.5 text-xs font-semibold transition',
+                        codeTab === 'app'
+                          ? 'bg-zinc-800 text-zinc-100'
+                          : 'bg-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200',
+                      ].join(' ')}
+                      title="Render the plugin UI bundle"
+                    >
+                      App
+                    </button>
+                  ) : null}
                   {isWorkspacePlugin ? (
                     <button
                       type="button"
@@ -337,6 +356,10 @@ export function ModuleFullscreenModal() {
                       <ReadOnlyFileViewer path={manifestPath} />
                     ) : codeTab === 'python' ? (
                       <ReadOnlyFileViewer path={wrapperPath} />
+                    ) : codeTab === 'app' ? (
+                      <div className="h-full overflow-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
+                        <BundlePluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
+                      </div>
                     ) : (
                       <div
                         className="grid h-full min-h-0 gap-2"

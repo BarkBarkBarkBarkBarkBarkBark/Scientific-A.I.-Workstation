@@ -26,6 +26,8 @@ export function createLayoutSlice(set: any, get: any): Pick<
       rightCollapsed: false,
       bottomHeight: 240,
 
+      bottomChatWidth: 520,
+
       patchReviewFilesWidth: 320,
       pluginBuilderSettingsWidth: 420,
       moduleFullscreenLeftWidth: 760,
