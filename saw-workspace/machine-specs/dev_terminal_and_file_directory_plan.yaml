@@ -1,0 +1,239 @@
+mr_spec_version: "0.1"
+system: "SAW"
+component: "dev_console"
+name: "Dev Terminal + File Directory (Drag/Drop) Implementation Plan"
+status: "proposal"
+date: "2026-01-25"
+
+context:
+  repo_root: "."
+  existing_ui:
+    - "ConsoleFullscreenModal (tabs: Logs, Errors, AI Suggestions, Todo, Dev)"
+    - "DeveloperPanel (Dev tab)"
+  existing_runtime_fs_api (Patch Engine):
+    - "GET /api/dev/tree?root=.&depth=6"
+    - "GET /api/dev/file?path=..."
+    - "POST /api/dev/file (write; non-safe)"
+    - "GET/POST /api/dev/caps (capabilities manifest in .saw/caps.json)"
+    - "POST /api/dev/safe/write (text write; creates intermediate dirs)"
+    - "POST /api/dev/safe/delete"
+    - "POST /api/dev/safe/applyPatch"
+  note: >
+    DeveloperPanel already prefers runtime tree (/api/dev/tree) and falls back to the
+    Vite-bundled file index (src/dev/sourceFiles.ts) when runtime FS is unavailable.
+
+problem_statement: >
+  Add (1) a local, sandboxed terminal experience in the UI and (2) a first-class file
+  directory view with drag-and-drop operations, building on the existing Dev fullscreen
+  file browser and Patch Engine safety model.
+
+high_level_goals:
+  - "Terminal UI embedded in SAW (xterm-like experience)"
+  - "Terminal is scoped to a sandbox directory by default"
+  - "File directory supports: browse, preview, create, delete, rename/move via drag/drop"
+  - "All file mutations go through Patch Engine safe endpoints and respect caps.json"
+  - "No secrets leak to the browser; same local-first constraints as existing Dev UI"
+
+non_goals_mvp:
+  - "No remote SSH terminal"
+  - "No multi-user auth"
+  - "No hardened security sandbox (this is a local dev tool; we reduce foot-guns, not guarantee isolation)"
+  - "No arbitrary agent-driven terminal execution"
+  - "No fancy file operations (diff viewers, git blame, multi-select, search indexing UI)"
+
+ux_spec:
+  terminal:
+    placement:
+      preferred: "New tab in ConsoleFullscreenModal: Terminal"
+      alternative: "Add terminal panel inside DeveloperPanel"
+    behaviors:
+      - "Shows scrollback + prompt"
+      - "Supports input, copy/paste, resize"
+      - "Reconnects if server restarts (shows 'disconnected' state)"
+    sandbox_defaults:
+      root_dir_rel: "saw-workspace/sandbox"
+      create_if_missing: true
+      working_dir_on_open: "saw-workspace/sandbox"
+
+  file_directory:
+    placement: "Extend existing DeveloperPanel file tree"
+    operations_mvp:
+      - "Create folder"
+      - "Create file"
+      - "Delete file/folder (folder must be empty in MVP)"
+      - "Rename/move via drag/drop within tree"
+      - "Preview text files in Monaco (existing behavior)"
+    drag_drop:
+      internal_move:
+        draggable: "files and (optionally) folders"
+        droppable_targets: "directories"
+        drop_behavior: "move dragged path under target directory"
+        guardrails:
+          - "Block moves that escape allowlisted roots"
+          - "Block when caps disallow (W/D)"
+          - "Confirm when overwriting existing destination"
+      os_file_drop (optional, phase 2):
+        - "Drop local files onto a directory to upload"
+        - "Use multipart upload endpoint; preserve binary"
+
+backend_spec (patch_engine):
+  new_env_flags:
+    - name: "SAW_ENABLE_TERMINAL"
+      default: "0"
+      purpose: "Gate terminal endpoints"
+    - name: "SAW_TERMINAL_ROOT"
+      default: "saw-workspace/sandbox"
+      purpose: "Restrict terminal sessions to a root working directory (soft boundary)"
+
+  new_api_endpoints:
+    - id: "term_open"
+      method: "POST"
+      path: "/api/dev/term/open"
+      gated_by: "SAW_ENABLE_TERMINAL=1"
+      request_json:
+        cwd_rel: { type: "string", optional: true, default: "SAW_TERMINAL_ROOT" }
+        shell: { type: "string", optional: true, default: "/bin/zsh" }
+        cols: { type: "integer", optional: true, default: 120 }
+        rows: { type: "integer", optional: true, default: 30 }
+      response_json:
+        session_id: { type: "string" }
+        cwd_rel: { type: "string" }
+
+    - id: "term_stream"
+      method: "GET"
+      path: "/api/dev/term/stream"
+      query:
+        session_id: { type: "string" }
+      response: "SSE stream of terminal output chunks"
+      events:
+        - "data: {type: 'stdout'|'stderr'|'exit', data: string, code?: number}"
+
+    - id: "term_write"
+      method: "POST"
+      path: "/api/dev/term/write"
+      request_json:
+        session_id: { type: "string" }
+        data: { type: "string", description: "raw bytes encoded as utf-8 string" }
+
+    - id: "term_resize"
+      method: "POST"
+      path: "/api/dev/term/resize"
+      request_json:
+        session_id: { type: "string" }
+        cols: { type: "integer" }
+        rows: { type: "integer" }
+
+    - id: "term_close"
+      method: "POST"
+      path: "/api/dev/term/close"
+      request_json:
+        session_id: { type: "string" }
+
+  implementation_notes:
+    - "Unix-only MVP: use stdlib pty + subprocess (macOS/Linux)"
+    - "Maintain in-memory session table keyed by session_id"
+    - "On open: spawn shell with cwd set to terminal root"
+    - "Soft boundary warning: user can still run destructive commands; keep root in saw-workspace/sandbox"
+    - "Do not expose terminal endpoints to the agent toolchain"
+
+  file_ops_extensions:
+    rationale: >
+      DeveloperPanel can already read the runtime tree and file content.
+      To support drag/drop and directory operations, Patch Engine needs move/rename and mkdir.
+    new_endpoints:
+      - id: "safe_mkdir"
+        method: "POST"
+        path: "/api/dev/safe/mkdir"
+        request_json:
+          path: { type: "string", description: "directory path relative to repo root" }
+        caps_required:
+          path: "W"
+      - id: "safe_move"
+        method: "POST"
+        path: "/api/dev/safe/move"
+        request_json:
+          src: { type: "string" }
+          dst: { type: "string" }
+          overwrite: { type: "boolean", default: false }
+        caps_required:
+          src: "D"
+          dst_parent: "W"
+      - id: "safe_upload"  # phase 2
+        method: "POST"
+        path: "/api/dev/safe/upload"
+        content_type: "multipart/form-data"
+        request_form:
+          dst_dir: { type: "string" }
+          file: { type: "file" }
+        caps_required:
+          dst_dir: "W"
+
+frontend_spec (vite/react):
+  new_deps:
+    - name: "xterm"
+      reason: "Terminal emulator"
+    - name: "xterm-addon-fit"
+      reason: "Auto-fit to container"
+
+  new_components:
+    - name: "TerminalPanel"
+      location: "src/components/TerminalPanel.tsx"
+      responsibilities:
+        - "Open/close session via Patch Engine"
+        - "Render xterm and stream output via SSE"
+        - "Send keystrokes via /api/dev/term/write"
+        - "Resize via /api/dev/term/resize"
+
+  integration_points:
+    - file: "src/components/ConsoleFullscreenModal.tsx"
+      change: "Add a 'Terminal' tab + render TerminalPanel"
+    - file: "src/store/slices/layoutSlice.ts"
+      change: "Add terminal tab enum value if needed"
+
+  file_directory_changes (DeveloperPanel):
+    - "Make TreeView rows draggable (HTML Drag and Drop)"
+    - "Make directory rows droppable"
+    - "On drop: POST /api/dev/safe/move"
+    - "Add small action buttons: New file, New folder, Delete"
+    - "After mutations: re-fetch /api/dev/tree (and optionally preserve expanded state)"
+
+security_and_safety_notes:
+  - "All filesystem writes must go through /api/dev/safe/* endpoints and honor caps.json"
+  - "Keep default caps W/D disabled; user enables via existing Capabilities UI"
+  - "Terminal is behind SAW_ENABLE_TERMINAL=1 and clearly labeled as local power tool"
+  - "Terminal root defaults to saw-workspace/sandbox to reduce accidental repo damage"
+
+rollout_plan:
+  phases:
+    - name: "Phase 0: Align on UX"
+      deliverables:
+        - "Decide Terminal placement: new tab vs inside Dev"
+        - "Decide whether folder drag/drop is MVP or phase 2"
+
+    - name: "Phase 1: File directory MVP"
+      deliverables:
+        - "Patch Engine: add safe/mkdir + safe/move"
+        - "DeveloperPanel: enable drag/drop move + create/delete"
+        - "Respect caps gating + show friendly errors"
+
+    - name: "Phase 2: Terminal MVP"
+      deliverables:
+        - "Patch Engine: /api/dev/term/* endpoints behind SAW_ENABLE_TERMINAL"
+        - "Frontend: TerminalPanel using xterm + SSE streaming"
+        - "Basic reconnect + resize handling"
+
+    - name: "Phase 3: OS file upload (optional)"
+      deliverables:
+        - "Patch Engine: safe/upload multipart"
+        - "DeveloperPanel: drop local files to upload"
+
+acceptance_criteria:
+  file_directory:
+    - "Can browse runtime tree and preview text files"
+    - "Can create folder/file under saw-workspace/ when W enabled"
+    - "Can drag a file onto a folder to move it"
+    - "Blocked operations show a clear caps message (like existing applyPatch guidance)"
+  terminal:
+    - "When SAW_ENABLE_TERMINAL=1, can open a shell rooted at saw-workspace/sandbox"
+    - "Typing echoes and output streams without freezing UI"
+    - "Terminal resize works (no garbled prompt)"

@@ -1,0 +1,70 @@
+OUTPUT YAML ONLY. No prose.
+
+You are in SAW. Produce an `IntrospectionPacket_v1` that is evidence-backed (command/file-read outputs).
+
+Rules:
+- Do NOT propose code changes.
+- Do NOT run destructive commands.
+- If you cannot run a command or read a file, record it as unavailable with the reason.
+
+Required fields:
+schema_version: "1.0"
+timestamp_utc: "<iso8601>"
+agent_identity:
+  name: "<what you call yourself>"
+  agent_kind: "<copilot_cli|custom_agent|other>"
+  version: "<string or unknown>"
+  build_hash: "<string or unknown>"
+runtime:
+  cwd: "<pwd>"
+  repo_root: "<git top-level if available>"
+  workspace_root_guess: "<best guess or unknown>"
+git_state:
+  head: "<git rev-parse HEAD>"
+  branch: "<git branch --show-current>"
+  is_dirty: "<true/false>"
+  status_porcelain: "<git status --porcelain=v1 (verbatim)>"
+capabilities:
+  can_read_files: <true/false>
+  can_list_dirs: <true/false>
+  can_run_shell: <true/false>
+  can_apply_patches: <true/false>
+  can_call_tools: <true/false>
+  tool_backends: ["saw_api", "mcp", "none_or_unknown"]
+policies_claimed:
+  patches_only: <true/false>
+  approval_required_for_writes: <true/false>
+  shell_vs_workspace_separation: <true/false>
+  allowed_write_roots: ["..."]
+  denied_roots: ["..."]
+tool_surface:
+  - tool_id: "<string>"
+    backend: "<saw_api|mcp>"
+    side_effects: ["disk_read","disk_write","network","subprocess"]
+    approval_required: <true/false>
+health:
+  llm_available: <true/false>
+  agent_chat_route_ok: <true/false>
+  last_error: "<string or empty>"
+evidence:
+  - kind: "command"
+    cmd: "<exact command>"
+    exit_code: <int or null>
+    stdout: "<verbatim or truncated with TRUNCATED: true>"
+    stderr: "<verbatim or empty>"
+  - kind: "file_read"
+    path: "<path>"
+    bytes: <int or null>
+    sha256: "<sha256 or null>"
+    head_40_lines: "<verbatim>"
+notes:
+  risks_or_unknowns: ["..."]
+
+Minimum evidence to collect (if possible):
+- pwd
+- git rev-parse --show-toplevel
+- git rev-parse HEAD
+- git branch --show-current
+- git status --porcelain=v1
+- list repo root (ls) and saw-workspace/ if present
+- if exists, read saw-workspace/machine-context/START_HERE.md (first 40 lines) and include sha256
