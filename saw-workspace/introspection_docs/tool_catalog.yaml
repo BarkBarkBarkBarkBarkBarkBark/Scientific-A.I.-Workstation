@@ -1,0 +1,13 @@
+OUTPUT YAML ONLY. No prose.
+
+Produce `ToolCatalogSnapshot_v1` listing every tool/action you can invoke from this chat session.
+
+For each tool:
+- tool_id
+- backend (saw_api|mcp)
+- args_schema (brief)
+- side_effects (disk_read/disk_write/network/subprocess)
+- approval_required (true/false)
+- availability (available|unavailable) with evidence
+
+Include evidence by actually calling the tool-listing mechanism you have (or stating it's unavailable).
