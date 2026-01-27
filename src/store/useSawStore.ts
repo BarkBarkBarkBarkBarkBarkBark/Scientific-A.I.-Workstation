@@ -13,6 +13,7 @@ import { createDevOpsSlice } from './slices/devOpsSlice'
 import { createPatchReviewSlice } from './slices/patchReviewSlice'
 import { createExecutionSlice } from './slices/executionSlice'
 import { createAudioSlice } from './slices/audioSlice'
+import { createA2uiDevSlice } from './slices/a2uiDevSlice'
 
 const _useSawStore = create<SawState>((set, get) => ({
   ...createConsoleSlice(set),
@@ -22,6 +23,7 @@ const _useSawStore = create<SawState>((set, get) => ({
   ...createAiSlice(set, get),
   ...createChatSlice(set, get),
   ...createDevOpsSlice(set, get),
+  ...createA2uiDevSlice(set),
   ...createPatchReviewSlice(set, get),
   ...createExecutionSlice(set, get),
   ...createAudioSlice(set, get),

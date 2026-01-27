@@ -147,6 +147,15 @@ export function DeveloperPanel() {
   const attached = useSawStore((s) => s.dev.attachedPaths)
   const devAttachPath = useSawStore((s) => s.devAttachPath)
   const devDetachPath = useSawStore((s) => s.devDetachPath)
+  const a2uiDev = useSawStore((s) => s.a2uiDev)
+  const setA2uiDevEnabled = useSawStore((s) => s.setA2uiDevEnabled)
+  const clearA2uiDevSnapshots = useSawStore((s) => s.clearA2uiDevSnapshots)
+
+  const a2uiSnapshots = useMemo(() => {
+    const snaps = Object.values(a2uiDev.snapshots ?? {})
+    snaps.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+    return snaps
+  }, [a2uiDev.snapshots])
 
   useEffect(() => {
     void (async () => {
@@ -500,6 +509,57 @@ export function DeveloperPanel() {
               {attestationRaw ? (
                 <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">{attestationRaw}</pre>
               ) : null}
+            </details>
+
+            <details className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/30 p-2">
+              <summary className="cursor-pointer select-none text-[11px] font-semibold text-zinc-300">
+                A2UI Dev
+              </summary>
+
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-[11px] text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={a2uiDev.enabled}
+                    onChange={(e) => setA2uiDevEnabled(e.target.checked)}
+                  />
+                  capture enabled
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => clearA2uiDevSnapshots()}
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <div className="mt-2 max-h-64 space-y-2 overflow-auto">
+                {a2uiSnapshots.length === 0 ? (
+                  <div className="text-[11px] text-zinc-500">No A2UI snapshots yet.</div>
+                ) : (
+                  a2uiSnapshots.slice(0, 20).map((s) => (
+                    <details key={s.nodeId} className="rounded-md border border-zinc-800 bg-zinc-950/40 p-2">
+                      <summary className="cursor-pointer select-none text-[11px] font-semibold text-zinc-300">
+                        {s.pluginId} • {s.nodeId}
+                      </summary>
+                      <div className="mt-2 text-[11px] text-zinc-500">
+                        last action: <span className="font-mono text-zinc-300">{s.lastAction?.action ?? '—'}</span>
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        last queries:{' '}
+                        <span className="font-mono text-zinc-300">
+                          {s.lastQueries?.ids?.length ? s.lastQueries.ids.join(', ') : '—'}
+                        </span>
+                      </div>
+                      <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
+                        {JSON.stringify(s, null, 2).slice(0, 50_000)}
+                      </pre>
+                    </details>
+                  ))
+                )}
+              </div>
             </details>
           </div>
         </div>

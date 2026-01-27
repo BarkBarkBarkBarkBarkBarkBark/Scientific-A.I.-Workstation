@@ -793,11 +793,29 @@ def plugins_ui_schema(plugin_id: str) -> dict[str, Any]:
     ui = getattr(plugin.manifest, "ui", None)
     if ui is None:
         raise HTTPException(status_code=404, detail="missing_ui_config")
-    if str(getattr(ui, "mode", "")) != "schema":
-        raise HTTPException(status_code=400, detail="ui_mode_not_schema")
+    # NOTE: We allow serving schema YAML even when ui.mode is not "schema".
+    # This enables incremental migration (e.g., ship ui/a2ui.yaml alongside a legacy bundle).
 
+    # A2UI discovery (incremental migration):
+    # Prefer plugins/<pluginId>/ui/a2ui.yaml when present.
+    # Otherwise fall back to the manifest-declared schema_file (default ui.yaml).
+    a2ui_candidates = ["ui/a2ui.yaml", "ui/a2ui.yml"]
     schema_file = str(getattr(ui, "schema_file", "ui.yaml") or "ui.yaml")
-    schema_path = _safe_join_under_dir(plugin.plugin_dir, schema_file)
+
+    chosen_rel = schema_file
+    chosen_kind = "schema"
+    for rel in a2ui_candidates:
+        try:
+            p = _safe_join_under_dir(plugin.plugin_dir, rel)
+            if os.path.isfile(p):
+                chosen_rel = rel
+                chosen_kind = "a2ui"
+                break
+        except HTTPException:
+            # Ignore invalid paths; we only probe fixed internal candidates.
+            pass
+
+    schema_path = _safe_join_under_dir(plugin.plugin_dir, chosen_rel)
     if not os.path.isfile(schema_path):
         raise HTTPException(status_code=404, detail="schema_file_not_found")
 
@@ -807,7 +825,13 @@ def plugins_ui_schema(plugin_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"schema_parse_failed: {e}")
 
     # Ensure JSON-serializable shape (yaml returns dict/list/scalars).
-    return {"ok": True, "plugin_id": pid, "schema_file": schema_file, "schema": raw}
+    return {
+        "ok": True,
+        "plugin_id": pid,
+        "schema_file": chosen_rel,
+        "schema_kind": chosen_kind,
+        "schema": raw,
+    }
 
 
 @app.get("/plugins/ui/bundle/{plugin_id}")
@@ -824,8 +848,8 @@ def plugins_ui_bundle(plugin_id: str) -> Response:
     ui = getattr(plugin.manifest, "ui", None)
     if ui is None:
         raise HTTPException(status_code=404, detail="missing_ui_config")
-    if str(getattr(ui, "mode", "")) != "bundle":
-        raise HTTPException(status_code=400, detail="ui_mode_not_bundle")
+    # NOTE: We allow serving bundle JS even when ui.mode is not "bundle".
+    # This enables incremental migration (schema is the default; bundle remains as a gated fallback).
 
     stock = load_stock_catalog()
     locked = bool(pid in stock)

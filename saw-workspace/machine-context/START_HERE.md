@@ -8,6 +8,7 @@ This folder is the canonical, machine-readable context bundle for SAW agents and
 - `context.json`: high-level runtime context snapshot (inputs for agents)
 - `api_endpoints.json`: API surface snapshot used by tools/clients
 - `files.json`: file inventory snapshot
+- `A2UI_DEPLOYMENT.md`: how to deploy A2UI plugin UIs (`ui/a2ui.yaml`)
 - `introspection/IntrospectionPacket_v1_1.schema.json`: JSON Schema for the audit-grade introspection packet
 - `tools/tools.catalog.v1.json`: tool catalog snapshot (generated from `/api/dev/tools/list` when available)
 - `attestation/default_probes.v1.json`: deterministic probe plan for one-button attestation

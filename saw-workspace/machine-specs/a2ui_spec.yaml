@@ -1,0 +1,481 @@
+a2ui_spec_version: "0.1"
+product: "SAW"
+goal: "Render plugin UIs as polished, consistent 'modules' using a declarative schema (no bespoke per-plugin DOM code required)."
+
+principles:
+  - "Single visual language across all plugins (design tokens + components)."
+  - "Safe by default: declarative UI only (no arbitrary JS execution) for most plugins."
+  - "Escape hatch allowed: legacy UI bundles supported behind feature flag."
+  - "State binding is explicit and auditable (node params, node runtime status, artifacts)."
+  - "Composable layouts: panels, sections, tabs, grids, toolbars."
+  - "Incremental migration: support mixed A2UI + legacy per plugin."
+
+runtime_contract:
+  host_app:
+    provides:
+      - id: "state.getNode"
+        input: { nodeId: "string" }
+        output: { node: "Node" }
+
+      - id: "state.updateNodeParam"
+        input: { nodeId: "string", key: "string", value: "any" }
+        output: { ok: "boolean" }
+
+      - id: "actions.runPluginNode"
+        input: { nodeId: "string" }
+        output: { ok: "boolean", runId: "string?" }
+
+      - id: "fs.fetchTree"
+        input: { root: "string", depth: "number" }
+        output: { tree: "FileTreeNode?" }
+
+      - id: "fs.fetchFile"
+        input: { path: "string" }
+        output: { ok: "boolean", bytes: "base64?" }
+
+      - id: "ui.toast"
+        input: { kind: "info|success|warn|error", message: "string" }
+        output: { ok: "boolean" }
+
+      - id: "ui.openExternal"
+        input: { url: "string" }
+        output: { ok: "boolean" }
+
+  data_model:
+    Node:
+      id: "string"
+      data:
+        pluginId: "string"
+        params: "map<string, any>"
+        status: "idle|running|error"
+        runtime:
+          exec:
+            last:
+              ok: "boolean"
+              error: "string?"
+              ts: "string?"
+
+design_system:
+  tokens:
+    color:
+      bg: "#0B0B0F"
+      panel: "#0E0F16"
+      panelAlt: "rgba(255,255,255,0.03)"
+      border: "rgba(255,255,255,0.08)"
+      text: "rgba(255,255,255,0.90)"
+      textMuted: "rgba(255,255,255,0.55)"
+      accent: "#7C3AED"
+      good: "#10B981"
+      warn: "#F59E0B"
+      bad: "#EF4444"
+    radius:
+      sm: 8
+      md: 12
+      lg: 16
+    space:
+      xs: 6
+      sm: 10
+      md: 14
+      lg: 20
+    typography:
+      fontUI: "Inter, system-ui"
+      fontMono: "ui-monospace, SFMono-Regular"
+      size:
+        xs: 11
+        sm: 13
+        md: 15
+        lg: 18
+      weight:
+        normal: 400
+        semibold: 600
+        bold: 700
+    motion:
+      fastMs: 120
+      normalMs: 180
+      slowMs: 260
+
+component_registry:
+  # The renderer maps these IDs to real React components (or your api.h wrapper).
+  primitives:
+    - "Text"
+    - "Icon"
+    - "Spacer"
+    - "Divider"
+  layout:
+    - "Stack"
+    - "Grid"
+    - "Row"
+    - "Panel"
+    - "Section"
+    - "Tabs"
+    - "Toolbar"
+  inputs:
+    - "TextField"
+    - "PathField"
+    - "Select"
+    - "Toggle"
+    - "Slider"
+  controls:
+    - "Button"
+    - "IconButton"
+    - "Badge"
+    - "ProgressSteps"
+  feedback:
+    - "Callout"
+    - "InlineError"
+    - "Skeleton"
+  advanced:
+    - "CodeBlock"
+    - "FileTree"
+    - "EmbeddedWebView"
+
+binding_language:
+  # Minimal expression system so A2UI can reference node params/runtime safely.
+  expressions:
+    - "${node.id}"
+    - "${node.data.pluginId}"
+    - "${node.data.params.patient}"
+    - "${node.data.status}"
+    - "${computed.rawSessionDir}"
+  computed:
+    # Computed values are pure functions of bindings + constants (no side-effects).
+    allowed_ops: ["concat", "trim", "lower", "upper", "len", "eq", "and", "or", "not", "if"]
+  rules:
+    - "No arbitrary JS eval."
+    - "All filesystem/probing happens via explicit 'queries' below."
+
+ui_document:
+  # A plugin can ship either a2ui.yaml (this format) OR legacy ui bundle.
+  plugin_entrypoints:
+    discovery:
+      - "plugins/<pluginId>/ui/a2ui.yaml"
+      - "plugins/<pluginId>/ui/index.js  # legacy"
+    precedence:
+      - "a2ui.yaml wins if present unless featureFlags.forceLegacyUi == true"
+
+feature_flags:
+  forceLegacyUi: false
+  allowLegacyUi: true
+  allowEmbeddedWebView: true
+  enableA2uiDevTools: true
+
+queries:
+  # Declarative probes that update local 'uiState' without writing code in each plugin UI.
+  - id: "probe.uploaded"
+    kind: "fsTreeSearch"
+    input:
+      root: "${computed.rawSessionDir}"
+      depth: 3
+      match:
+        type: "file"
+        nameEndsWith: ".rhd"
+    output: { into: "uiState.status.uploaded" }
+
+  - id: "probe.sorted"
+    kind: "fsDirNonEmpty"
+    input: { root: "${computed.sorterDir}", depth: 1 }
+    output: { into: "uiState.status.sorted" }
+
+  - id: "probe.analyzed"
+    kind: "fsDirNonEmpty"
+    input: { root: "${computed.analyzerDir}", depth: 1 }
+    output: { into: "uiState.status.analyzed" }
+
+  - id: "probe.curation"
+    kind: "fsFileExists"
+    input: { path: "${computed.curationDir}/curation_data.json" }
+    output: { into: "uiState.status.curation" }
+
+actions:
+  # High-level actions the UI can dispatch. Host maps these to your existing store funcs.
+  - id: "setParam"
+    kind: "state.updateNodeParam"
+    input:
+      nodeId: "${node.id}"
+      key: "${event.key}"
+      value: "${event.value}"
+
+  - id: "runStep"
+    kind: "sequence"
+    steps:
+      - id: "maybeClearRecordingPath"
+        kind: "conditional"
+        if: { op: "neq", a: "${event.step}", b: "upload" }
+        then:
+          - kind: "state.updateNodeParam"
+            input: { nodeId: "${node.id}", key: "recording_path", value: "" }
+
+      - id: "setStep"
+        kind: "state.updateNodeParam"
+        input: { nodeId: "${node.id}", key: "step", value: "${event.step}" }
+
+      - id: "run"
+        kind: "actions.runPluginNode"
+        input: { nodeId: "${node.id}" }
+
+      - id: "toast"
+        kind: "ui.toast"
+        input:
+          kind: "info"
+          message: "Started '${event.step}'"
+
+documents:
+  - id: "zlab.sorting_script.module"
+    kind: "PluginModule"
+    pluginId: "zlab.sorting_script"
+    title: "Zlab Sorting Script"
+    subtitle: "Upload → Sort → Analyze → Curate"
+    context:
+      bindings:
+        node: "${host.state.getNode(nodeId)}"
+      defaults:
+        uiState:
+          status:
+            uploaded: false
+            sorted: false
+            analyzed: false
+            curation: false
+    computed:
+      artifactsRoot:
+        op: "concat"
+        args: ["saw-workspace/artifacts/", "${node.data.pluginId}"]
+      dataRoot:
+        op: "concat"
+        args: ["${computed.artifactsRoot}", "/data"]
+      patient:
+        op: "trim"
+        args: ["${node.data.params.patient}"]
+      session:
+        op: "trim"
+        args: ["${node.data.params.session}"]
+      recordingPath:
+        op: "trim"
+        args: ["${node.data.params.recording_path}"]
+      rawSessionDir:
+        op: "concat"
+        args: ["${computed.dataRoot}", "/raw/", "${computed.patient}", "/", "${computed.session}"]
+      sortedSessionDir:
+        op: "concat"
+        args: ["${computed.dataRoot}", "/sorted/", "${computed.patient}", "/", "${computed.session}"]
+      sorterDir:
+        op: "concat"
+        args: ["${computed.sortedSessionDir}", "/sorter_folder"]
+      analyzerDir:
+        op: "concat"
+        args: ["${computed.sortedSessionDir}", "/analyzer_folder"]
+      curationDir:
+        op: "concat"
+        args: ["${computed.analyzerDir}", "/spikeinterface_gui"]
+      canUpload:
+        op: "and"
+        args:
+          - { op: "gt", args: [{ op: "len", args: ["${computed.patient}"] }, 0] }
+          - { op: "gt", args: [{ op: "len", args: ["${computed.session}"] }, 0] }
+          - { op: "gt", args: [{ op: "len", args: ["${computed.recordingPath}"] }, 0] }
+
+    lifecycle:
+      onMount:
+        - kind: "runQueries"
+          queries: ["probe.uploaded", "probe.sorted", "probe.analyzed", "probe.curation"]
+      onBindingChange:
+        bindings: ["computed.patient", "computed.session"]
+        do:
+          - kind: "runQueries"
+            queries: ["probe.uploaded", "probe.sorted", "probe.analyzed", "probe.curation"]
+
+    view:
+      type: "Stack"
+      props: { gap: "md" }
+      children:
+        - type: "Panel"
+          props: { variant: "moduleHeader" }
+          children:
+            - type: "Row"
+              props: { justify: "spaceBetween", align: "center" }
+              children:
+                - type: "Stack"
+                  props: { gap: "xs" }
+                  children:
+                    - type: "Text"
+                      props: { variant: "title" }
+                      text: "${document.title}"
+                    - type: "Text"
+                      props: { variant: "subtitle" }
+                      text: "${document.subtitle}"
+                - type: "Badge"
+                  props:
+                    kind:
+                      op: "if"
+                      args:
+                        - { op: "eq", args: ["${node.data.status}", "running"] }
+                        - "warn"
+                        - "neutral"
+                  text:
+                    op: "if"
+                    args:
+                      - { op: "eq", args: ["${node.data.status}", "running"] }
+                      - "Running…"
+                      - "Idle"
+
+        - type: "Panel"
+          props: { title: "Inputs" }
+          children:
+            - type: "Grid"
+              props: { columns: 1, gap: "sm" }
+              children:
+                - type: "TextField"
+                  props:
+                    label: "Patient"
+                    placeholder: "e.g. Intan_RHD_2000"
+                    value: "${computed.patient}"
+                    onChange:
+                      action: "setParam"
+                      event: { key: "patient", value: "${event.value}" }
+
+                - type: "TextField"
+                  props:
+                    label: "Session"
+                    placeholder: "e.g. session_1"
+                    value: "${computed.session}"
+                    onChange:
+                      action: "setParam"
+                      event: { key: "session", value: "${event.value}" }
+
+                - type: "PathField"
+                  props:
+                    label: "Recording path"
+                    placeholder: "Absolute path to .rhd (or folder containing it)"
+                    value: "${computed.recordingPath}"
+                    onChange:
+                      action: "setParam"
+                      event: { key: "recording_path", value: "${event.value}" }
+
+        - type: "Panel"
+          props: { title: "Actions" }
+          children:
+            - type: "Toolbar"
+              props: { layout: "grid", columns: 2, gap: "sm" }
+              children:
+                - type: "Button"
+                  props:
+                    label: "Upload"
+                    variant: "primary"
+                    disabled:
+                      op: "or"
+                      args:
+                        - { op: "not", args: ["${computed.canUpload}"] }
+                        - { op: "eq", args: ["${node.data.status}", "running"] }
+                    onClick:
+                      action: "runStep"
+                      event: { step: "upload" }
+
+                - type: "Button"
+                  props:
+                    label: "Sort"
+                    variant: "secondary"
+                    disabled:
+                      op: "or"
+                      args:
+                        - { op: "not", args: ["${uiState.status.uploaded}"] }
+                        - { op: "eq", args: ["${node.data.status}", "running"] }
+                    onClick:
+                      action: "runStep"
+                      event: { step: "sort" }
+
+                - type: "Button"
+                  props:
+                    label: "Create Analyzer"
+                    variant: "secondary"
+                    disabled:
+                      op: "or"
+                      args:
+                        - { op: "not", args: ["${uiState.status.sorted}"] }
+                        - { op: "eq", args: ["${node.data.status}", "running"] }
+                    onClick:
+                      action: "runStep"
+                      event: { step: "analyze" }
+
+                - type: "Button"
+                  props:
+                    label: "Launch Curation Window"
+                    variant: "secondary"
+                    disabled:
+                      op: "or"
+                      args:
+                        - { op: "not", args: ["${uiState.status.analyzed}"] }
+                        - { op: "eq", args: ["${node.data.status}", "running"] }
+                    onClick:
+                      action: "runStep"
+                      event: { step: "gui" }
+
+            - type: "ProgressSteps"
+              props:
+                steps:
+                  - { label: "Upload", done: "${uiState.status.uploaded}" }
+                  - { label: "Sort", done: "${uiState.status.sorted}" }
+                  - { label: "Analyze", done: "${uiState.status.analyzed}" }
+                  - { label: "Curation", done: "${uiState.status.curation}" }
+
+            - type: "InlineError"
+              props:
+                visible: "${node.data.status == 'error'}"
+                message: "${node.data.runtime.exec.last.error}"
+
+        - type: "Panel"
+          props: { title: "Paths", collapsible: true, defaultOpen: false }
+          children:
+            - type: "CodeBlock"
+              props:
+                language: "text"
+                value:
+                  op: "concat"
+                  args:
+                    - "raw: "
+                    - "${computed.rawSessionDir}"
+                    - "\nsorted: "
+                    - "${computed.sortedSessionDir}"
+                    - "\nsorter: "
+                    - "${computed.sorterDir}"
+                    - "\nanalyzer: "
+                    - "${computed.analyzerDir}"
+
+migration_plan:
+  phases:
+    - id: "P0"
+      name: "Introduce renderer + tokens"
+      deliverables:
+        - "A2UI document loader (per plugin)"
+        - "Component registry + theming tokens"
+        - "Binding engine (safe expressions)"
+        - "Action dispatcher mapping to store funcs"
+        - "Query runner for file probes"
+      debt_controls:
+        - "No plugin-specific UI code added during P0"
+        - "One canonical component API; forbid ad-hoc Tailwind in plugins"
+
+    - id: "P1"
+      name: "Shim legacy UI"
+      deliverables:
+        - "Legacy ui/index.js continues to work behind allowLegacyUi flag"
+        - "Per-plugin opt-in: if a2ui.yaml exists, it takes precedence"
+      debt_controls:
+        - "Add telemetry/logging: which plugins still use legacy"
+        - "No new legacy UIs allowed (lint rule)"
+
+    - id: "P2"
+      name: "Migrate top 5 plugins"
+      deliverables:
+        - "Convert hand-built UIs to a2ui.yaml"
+        - "Validate parity: same actions/bindings/probes"
+      debt_controls:
+        - "Create reusable patterns: InputPanel, ActionPanel, Stepper"
+        - "Delete duplicated DOM snippets after migration"
+
+    - id: "P3"
+      name: "Agent-assisted UI authoring"
+      deliverables:
+        - "Optional agent tool: generate draft a2ui.yaml from plugin.yaml + wrapper signature"
+        - "Human review gate + visual diff preview"
+      debt_controls:
+        - "Generated UIs must only use allowed components"
+        - "Golden tests: snapshot render + action dispatch contract"

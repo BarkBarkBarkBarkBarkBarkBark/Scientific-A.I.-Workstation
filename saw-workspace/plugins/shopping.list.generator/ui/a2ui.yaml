@@ -1,0 +1,104 @@
+a2ui_spec_version: "0.1"
+kind: "PluginModule"
+pluginId: "shopping.list.generator"
+title: "Shopping List"
+subtitle: "One-click meal + ingredients"
+
+computed:
+  meal:
+    op: trim
+    args: ["${node.data.runtime.exec.last.outputs.result.meal}"]
+  ingredients: "${node.data.runtime.exec.last.outputs.result.ingredients}"
+  hasIngredients:
+    op: gt
+    args:
+      - { op: len, args: ["${computed.ingredients}"] }
+      - 0
+
+view:
+  type: Stack
+  props: { gap: md }
+  children:
+    - type: Panel
+      props: { variant: moduleHeader }
+      children:
+        - type: Row
+          props: { justify: spaceBetween, align: center }
+          children:
+            - type: Stack
+              props: { gap: xs }
+              children:
+                - type: Text
+                  props: { variant: title }
+                  text: "${document.title}"
+                - type: Text
+                  props: { variant: subtitle }
+                  text: "${document.subtitle}"
+            - type: Badge
+              props:
+                kind:
+                  op: if
+                  args:
+                    - { op: eq, args: ["${node.data.status}", running] }
+                    - warn
+                    - neutral
+              text:
+                op: if
+                args:
+                  - { op: eq, args: ["${node.data.status}", running] }
+                  - "Running…"
+                  - "Idle"
+
+    - type: Panel
+      props: { title: "Generate" }
+      children:
+        - type: Row
+          props: { justify: spaceBetween, align: center }
+          children:
+            - type: Text
+              props: { variant: muted }
+              text: "Click Run to generate a shopping list."
+            - type: Button
+              props:
+                label: "Run"
+                variant: primary
+                disabled:
+                  op: eq
+                  args: ["${node.data.status}", running]
+                onClick:
+                  action: actions.runPluginNode
+                  event: { nodeId: "${node.id}" }
+
+        - type: InlineError
+          props:
+            visible: "${node.data.status == 'error'}"
+            message: "${node.data.runtime.exec.last.error}"
+
+    - type: Panel
+      props: { title: "Result" }
+      children:
+        - type: Stack
+          props: { gap: sm }
+          children:
+            - type: Text
+              props: { variant: normal }
+              text:
+                op: if
+                args:
+                  - { op: gt, args: [{ op: len, args: ["${computed.meal}"] }, 0] }
+                  - { op: concat, args: ["Meal: ", "${computed.meal}"] }
+                  - "Meal: —"
+
+            - type: Text
+              props: { variant: muted }
+              text:
+                op: if
+                args:
+                  - "${computed.hasIngredients}"
+                  - "Ingredients"
+                  - "Ingredients (run to generate)"
+
+            - type: List
+              props:
+                items: "${computed.ingredients}"
+

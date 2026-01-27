@@ -65,8 +65,8 @@ resources:
   threads: 4
 
 ui:
-  mode: "bundle"
-  schema_file: "ui.yaml"
+  mode: "schema"
+  schema_file: "ui/a2ui.yaml"
   bundle_file: "ui/ui.bundle.js"
   sandbox: true
 

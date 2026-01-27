@@ -3,6 +3,7 @@ import type { PluginDefinition, PluginNode } from '../types/saw'
 import type { AiStatus } from '../types/ai'
 import type { AgentToolCall, ChatMessage } from '../ai/client'
 import type { PatchProposal } from '../types/patch'
+import type { A2uiDevSnapshot } from './slices/a2uiDevSlice'
 
 export type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo' | 'terminal'
 export type LayoutMode = 'pipeline' | 'graph'
@@ -76,6 +77,9 @@ export type SawState = {
   workspacePlugins: PluginDefinition[]
   pluginCatalog: PluginDefinition[]
 
+  // A2UI DevTools
+  a2uiDev: { enabled: boolean; snapshots: Record<string, A2uiDevSnapshot> }
+
   // Actions
   refreshWorkspacePlugins: () => Promise<void>
   onNodesChange: (changes: NodeChange[]) => void
@@ -105,6 +109,10 @@ export type SawState = {
   updateNodeInput: (nodeId: string, inputId: string, value: string | number) => void
   openFullscreen: (nodeId: string) => void
   closeFullscreen: () => void
+
+  setA2uiDevEnabled: (enabled: boolean) => void
+  setA2uiDevSnapshot: (snap: A2uiDevSnapshot) => void
+  clearA2uiDevSnapshots: () => void
 
   refreshAiStatus: () => Promise<void>
   submitGoal: (goal: string) => Promise<void>

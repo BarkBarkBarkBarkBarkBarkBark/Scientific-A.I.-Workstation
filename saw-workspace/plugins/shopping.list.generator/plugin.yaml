@@ -24,3 +24,8 @@ side_effects:
 resources:
   gpu: forbidden
   threads: 1
+
+ui:
+  mode: schema
+  schema_file: "ui/a2ui.yaml"
+  sandbox: true

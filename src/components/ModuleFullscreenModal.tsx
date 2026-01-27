@@ -11,6 +11,7 @@ import { NodeRunPanel } from './inspector/NodeRunPanel'
 import { fetchDevTree, type DevTreeNode } from '../dev/runtimeTree'
 import { SchemaPluginUi } from './plugin_ui/SchemaPluginUi'
 import { BundlePluginUi } from './plugin_ui/BundlePluginUi'
+import { getA2uiFeatureFlags } from '../plugins/a2ui/featureFlags'
 
 type TreeNode =
   | { kind: 'dir'; name: string; path: string; children: TreeNode[] }
@@ -225,13 +226,22 @@ export function ModuleFullscreenModal() {
             <Panel title="Module" className="min-h-0 overflow-hidden">
               <div className="h-full overflow-auto p-3">
                 <div className="space-y-3">
-                  {plugin.ui?.mode === 'bundle' ? (
-                    <BundlePluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
-                  ) : plugin.ui?.mode === 'schema' ? (
-                    <SchemaPluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
-                  ) : (
-                    <div className="space-y-3">{defaultUi}</div>
-                  )}
+                  {(() => {
+                    const flags = getA2uiFeatureFlags()
+
+                    if (plugin.ui?.mode === 'schema') {
+                      if (flags.allowLegacyUi && flags.forceLegacyUi) {
+                        return <BundlePluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
+                      }
+                      return <SchemaPluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
+                    }
+
+                    if (plugin.ui?.mode === 'bundle') {
+                      return <BundlePluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
+                    }
+
+                    return <div className="space-y-3">{defaultUi}</div>
+                  })()}
                 </div>
               </div>
             </Panel>
