@@ -7,15 +7,18 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "test": "vitest",
     "validate:api-endpoints": "tsx --tsconfig tsconfig.tools.json tools/validate_api_endpoints.ts",
     "validate:api-endpoints:live": "tsx --tsconfig tsconfig.tools.json tools/validate_api_endpoints_live.ts",
     "validate": "npm run validate:api-endpoints"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
+    "@xterm/addon-fit": "^0.11.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "reactflow": "^11.11.4",
+    "xterm": "^5.3.0",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
@@ -29,6 +32,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
+    "vitest": "^4.0.18",
     "zod": "^3.25.76"
   }
 }

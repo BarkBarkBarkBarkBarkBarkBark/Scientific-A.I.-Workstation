@@ -3,6 +3,7 @@ import { useSawStore } from '../store/useSawStore'
 import { Panel } from './ui/Panel'
 import { DeveloperPanel } from './DeveloperPanel'
 import { TodoPanel } from './TodoPanel'
+import { TerminalPanel } from './TerminalPanel'
 
 function TabButton(props: { active: boolean; onClick: () => void; children: string }) {
   return (
@@ -65,6 +66,9 @@ export function ConsoleFullscreenModal() {
               <TabButton active={tab === 'dev'} onClick={() => setTab('dev')}>
                 Dev
               </TabButton>
+              <TabButton active={tab === 'terminal'} onClick={() => setTab('terminal')}>
+                Terminal
+              </TabButton>
             </div>
             <button
               type="button"
@@ -78,7 +82,9 @@ export function ConsoleFullscreenModal() {
         className="h-full overflow-hidden"
       >
         <div className="h-full min-h-0 p-2">
-          {tab === 'dev' ? (
+          {tab === 'terminal' ? (
+            <TerminalPanel />
+          ) : tab === 'dev' ? (
             <div className="h-full p-0">
               <DeveloperPanel />
             </div>

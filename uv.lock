@@ -2456,6 +2456,7 @@ dependencies = [
     { name = "uc-micro-py" },
     { name = "urllib3" },
     { name = "uvicorn" },
+    { name = "vitest" },
     { name = "wcwidth" },
     { name = "webencodings" },
     { name = "widgetsnbextension" },
@@ -2601,6 +2602,7 @@ requires-dist = [
     { name = "uc-micro-py", specifier = "==1.0.3" },
     { name = "urllib3", specifier = "==2.6.3" },
     { name = "uvicorn", specifier = "==0.34.0" },
+    { name = "vitest", specifier = ">=2.0" },
     { name = "wcwidth", specifier = "==0.2.14" },
     { name = "webencodings", specifier = "==0.5.1" },
     { name = "widgetsnbextension", specifier = "==4.0.15" },
@@ -3081,6 +3083,14 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4b/4d/938bd85e5bf2edeec766267a5015ad969730bb91e31b44021dfe8b22df6c/uvicorn-0.34.0.tar.gz", hash = "sha256:404051050cd7e905de2c9a7e61790943440b3416f49cb409f965d9dcd0fa73e9", size = 76568, upload-time = "2024-12-15T13:33:30.42Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/61/14/33a3a1352cfa71812a3a21e8c9bfb83f60b0011f5e36f2b1399d51928209/uvicorn-0.34.0-py3-none-any.whl", hash = "sha256:023dc038422502fa28a09c7a30bf2b6991512da7dcdb8fd35fe57cfc154126f4", size = 62315, upload-time = "2024-12-15T13:33:27.467Z" },
+]
+
+[[package]]
+name = "vitest"
+version = "2.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/86/ba54db9959add50ddb5113dd4383116e236c0eea81a6670988b5509b5e4a/ViTest-2.0-py38-none-any.whl", hash = "sha256:d24c815f7a30178a9645a72c8ba14accd01deeaf45a3a6d2f7b3e7dfdc959fdf", size = 1839, upload-time = "2023-05-08T08:25:26.07Z" },
 ]
 
 [[package]]

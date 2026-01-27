@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import contextvars
 from datetime import datetime
+import fcntl
 import json
 import os
+import pty
+import queue
+import select
+import signal
+import struct
 import subprocess
+import termios
+import threading
 import time
 import uuid
 from functools import lru_cache
@@ -104,6 +112,9 @@ DEBUG_LOG_PATH = os.environ.get("SAW_PATCH_ENGINE_DEBUG_LOG_PATH") or os.path.jo
 _REQ_ID: contextvars.ContextVar[str] = contextvars.ContextVar("saw_req_id", default="")
 
 SAW_PATCH_ENGINE_USE_STASH = _truthy(os.environ.get("SAW_PATCH_ENGINE_USE_STASH", "0"))
+
+SAW_ENABLE_TERMINAL = _truthy(os.environ.get("SAW_ENABLE_TERMINAL", "0"))
+SAW_TERMINAL_ROOT = str(os.environ.get("SAW_TERMINAL_ROOT") or "saw-workspace/sandbox").replace("\\", "/")
 
 _PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -810,7 +821,293 @@ def dev_flags() -> dict[str, Any]:
         "SAW_ENABLE_PATCH_ENGINE": _truthy(os.environ.get("SAW_ENABLE_PATCH_ENGINE", "1")),
         "SAW_ENABLE_DB": _truthy(os.environ.get("SAW_ENABLE_DB", "1")),
         "SAW_ENABLE_PLUGINS": _truthy(os.environ.get("SAW_ENABLE_PLUGINS", "1")),
+        "SAW_ENABLE_TERMINAL": SAW_ENABLE_TERMINAL,
     }
+
+
+# -----------------------
+# Dev: terminal (local sandbox)
+# -----------------------
+
+
+@dataclass
+class _TerminalSession:
+    session_id: str
+    pid: int
+    master_fd: int
+    cwd_rel: str
+    created_at_ms: int
+    q: "queue.Queue[dict[str, Any]]"
+    closed: bool = False
+
+
+_TERMINAL_SESSIONS: dict[str, _TerminalSession] = {}
+_TERMINAL_LOCK = threading.Lock()
+
+
+def _term_require_enabled() -> None:
+    if not SAW_ENABLE_TERMINAL:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "terminal_disabled",
+                "hint": "Set SAW_ENABLE_TERMINAL=1 and restart Patch Engine.",
+            },
+        )
+
+
+def _term_root_abs() -> str:
+    resolved = safe_resolve(ROOT, SAW_TERMINAL_ROOT)
+    if not resolved.ok:
+        raise HTTPException(status_code=400, detail={"error": "invalid_terminal_root", "reason": resolved.reason})
+    return resolved.abs
+
+
+def _term_cwd_abs(cwd_rel: str | None) -> tuple[str, str]:
+    root_abs = _term_root_abs()
+    root_abs_norm = os.path.abspath(root_abs)
+
+    requested_rel = str(cwd_rel or SAW_TERMINAL_ROOT).replace("\\", "/")
+    resolved = safe_resolve(ROOT, requested_rel)
+    if not resolved.ok:
+        raise HTTPException(status_code=400, detail={"error": "invalid_cwd", "reason": resolved.reason})
+
+    cwd_abs = os.path.abspath(resolved.abs)
+    try:
+        common = os.path.commonpath([root_abs_norm, cwd_abs])
+    except Exception:
+        common = ""
+    if common != root_abs_norm:
+        raise HTTPException(status_code=403, detail={"error": "cwd_outside_terminal_root", "cwd": requested_rel, "root": SAW_TERMINAL_ROOT})
+    return requested_rel, cwd_abs
+
+
+def _term_set_winsize(fd: int, cols: int, rows: int) -> None:
+    cols_n = max(20, min(400, int(cols)))
+    rows_n = max(5, min(200, int(rows)))
+    buf = struct.pack("HHHH", rows_n, cols_n, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, buf)
+
+
+def _term_reader_thread(sess: _TerminalSession) -> None:
+    pid = sess.pid
+    fd = sess.master_fd
+    q = sess.q
+    append_session({"type": "term.open", "session_id": sess.session_id, "cwd": sess.cwd_rel})
+
+    exit_code: int | None = None
+    try:
+        while True:
+            if sess.closed:
+                break
+
+            # Prefer reading from PTY when data is available.
+            try:
+                r, _, _ = select.select([fd], [], [], 0.25)
+            except Exception:
+                r = []
+            if r:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    chunk = b""
+                if chunk:
+                    q.put({"type": "stdout", "data": chunk.decode("utf-8", errors="ignore")})
+
+            # Poll for process exit.
+            try:
+                wpid, status = os.waitpid(pid, os.WNOHANG)
+                if wpid == pid:
+                    if os.WIFEXITED(status):
+                        exit_code = int(os.WEXITSTATUS(status))
+                    elif os.WIFSIGNALED(status):
+                        exit_code = 128 + int(os.WTERMSIG(status))
+                    else:
+                        exit_code = 0
+                    break
+            except ChildProcessError:
+                exit_code = exit_code if exit_code is not None else 0
+                break
+            except Exception:
+                pass
+    finally:
+        q.put({"type": "exit", "code": exit_code})
+        append_session({"type": "term.exit", "session_id": sess.session_id, "code": exit_code})
+
+
+@app.post("/api/dev/term/open")
+async def dev_term_open(req: Request) -> dict[str, Any]:
+    _term_require_enabled()
+    body = await req.json()
+    cwd_rel_in = (body or {}).get("cwd_rel")
+    shell = str((body or {}).get("shell") or os.environ.get("SHELL") or "/bin/zsh")
+    cols = int((body or {}).get("cols") or 120)
+    rows = int((body or {}).get("rows") or 30)
+
+    cwd_rel, cwd_abs = _term_cwd_abs(str(cwd_rel_in) if cwd_rel_in is not None else None)
+    os.makedirs(cwd_abs, exist_ok=True)
+
+    sid = str(uuid.uuid4())
+    q: "queue.Queue[dict[str, Any]]" = queue.Queue()
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        # Child: exec shell inside the sandbox cwd.
+        try:
+            os.chdir(cwd_abs)
+        except Exception:
+            pass
+
+        os.environ["TERM"] = "xterm-256color"
+        os.environ["SAW_TERMINAL"] = "1"
+        os.environ["SAW_TERMINAL_ROOT"] = SAW_TERMINAL_ROOT
+
+        try:
+            os.execv(shell, [shell])
+        except Exception:
+            os.execv("/bin/sh", ["/bin/sh"])
+        raise SystemExit(0)
+
+    # Parent
+    try:
+        _term_set_winsize(fd, cols=cols, rows=rows)
+        try:
+            os.kill(pid, signal.SIGWINCH)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    sess = _TerminalSession(
+        session_id=sid,
+        pid=pid,
+        master_fd=fd,
+        cwd_rel=cwd_rel,
+        created_at_ms=int(time.time() * 1000),
+        q=q,
+    )
+
+    with _TERMINAL_LOCK:
+        _TERMINAL_SESSIONS[sid] = sess
+
+    t = threading.Thread(target=_term_reader_thread, args=(sess,), daemon=True)
+    t.start()
+
+    return {"session_id": sid, "cwd_rel": cwd_rel}
+
+
+@app.get("/api/dev/term/stream")
+def dev_term_stream(session_id: str) -> Any:
+    _term_require_enabled()
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail={"error": "missing_session_id"})
+
+    with _TERMINAL_LOCK:
+        sess = _TERMINAL_SESSIONS.get(sid)
+    if not sess:
+        raise HTTPException(status_code=404, detail={"error": "unknown_session"})
+
+    def gen():
+        # Minimal SSE: forward queued events; emit keepalives.
+        last_keepalive = time.time()
+        while True:
+            if sess.closed:
+                break
+            try:
+                ev = sess.q.get(timeout=0.5)
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                if isinstance(ev, dict) and ev.get("type") == "exit":
+                    break
+            except queue.Empty:
+                if time.time() - last_keepalive > 10:
+                    last_keepalive = time.time()
+                    yield ": keepalive\n\n"
+                continue
+
+    from starlette.responses import StreamingResponse
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/api/dev/term/write")
+async def dev_term_write(req: Request) -> dict[str, Any]:
+    _term_require_enabled()
+    body = await req.json()
+    sid = str((body or {}).get("session_id") or "").strip()
+    data = str((body or {}).get("data") or "")
+    if not sid:
+        raise HTTPException(status_code=400, detail={"error": "missing_session_id"})
+
+    with _TERMINAL_LOCK:
+        sess = _TERMINAL_SESSIONS.get(sid)
+    if not sess or sess.closed:
+        raise HTTPException(status_code=404, detail={"error": "unknown_session"})
+
+    try:
+        os.write(sess.master_fd, data.encode("utf-8", errors="ignore"))
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "term_write_failed", "details": str(e)[:2000]})
+
+
+@app.post("/api/dev/term/resize")
+async def dev_term_resize(req: Request) -> dict[str, Any]:
+    _term_require_enabled()
+    body = await req.json()
+    sid = str((body or {}).get("session_id") or "").strip()
+    cols = int((body or {}).get("cols") or 120)
+    rows = int((body or {}).get("rows") or 30)
+    if not sid:
+        raise HTTPException(status_code=400, detail={"error": "missing_session_id"})
+
+    with _TERMINAL_LOCK:
+        sess = _TERMINAL_SESSIONS.get(sid)
+    if not sess or sess.closed:
+        raise HTTPException(status_code=404, detail={"error": "unknown_session"})
+
+    try:
+        _term_set_winsize(sess.master_fd, cols=cols, rows=rows)
+        try:
+            os.kill(sess.pid, signal.SIGWINCH)
+        except Exception:
+            pass
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "term_resize_failed", "details": str(e)[:2000]})
+
+
+@app.post("/api/dev/term/close")
+async def dev_term_close(req: Request) -> dict[str, Any]:
+    _term_require_enabled()
+    body = await req.json()
+    sid = str((body or {}).get("session_id") or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail={"error": "missing_session_id"})
+
+    with _TERMINAL_LOCK:
+        sess = _TERMINAL_SESSIONS.get(sid)
+        if sess:
+            sess.closed = True
+
+    if not sess:
+        return {"ok": True}
+
+    try:
+        try:
+            os.kill(sess.pid, signal.SIGTERM)
+        except Exception:
+            pass
+        try:
+            os.close(sess.master_fd)
+        except Exception:
+            pass
+    finally:
+        with _TERMINAL_LOCK:
+            _TERMINAL_SESSIONS.pop(sid, None)
+
+    append_session({"type": "term.close", "session_id": sid})
+    return {"ok": True}
 
 
 @app.get("/api/dev/caps")

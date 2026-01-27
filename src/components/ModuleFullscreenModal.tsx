@@ -196,8 +196,8 @@ export function ModuleFullscreenModal() {
 
   return (
     <div
-      className="fixed inset-y-0 left-0 z-[60] bg-black/70 p-4"
-      style={{ right: layout.bottomChatWidth + 12 }}
+      className="fixed left-0 top-0 z-[60] bg-black/70 p-4"
+      style={{ right: layout.bottomChatWidth + 12, bottom: layout.bottomHeight + 12 }}
     >
       <div className="h-full w-full">
         <Panel

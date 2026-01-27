@@ -4,7 +4,7 @@ import type { AiStatus } from '../types/ai'
 import type { AgentToolCall, ChatMessage } from '../ai/client'
 import type { PatchProposal } from '../types/patch'
 
-export type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo'
+export type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo' | 'terminal'
 export type LayoutMode = 'pipeline' | 'graph'
 
 export type FullscreenState = {
