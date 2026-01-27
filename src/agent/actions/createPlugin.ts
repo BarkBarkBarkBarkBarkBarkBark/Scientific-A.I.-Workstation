@@ -44,7 +44,7 @@ export const ResourcesSpecSchema = z.object({
 
 export const PluginUiSpecSchema = z.object({
   mode: z.enum(['schema', 'bundle']).default('schema'),
-  schema_file: z.string().default('ui/a2ui.yaml'),
+  schema_file: z.string().default('ui/declarative_ui.yaml'),
   bundle_file: z.string().default('ui/ui.bundle.js'),
   sandbox: z.boolean().default(true),
 })
@@ -65,6 +65,15 @@ export const PluginManifestSchema = z.object({
   side_effects: SideEffectsSpecSchema,
   resources: ResourcesSpecSchema,
   ui: PluginUiSpecSchema.optional().nullable(),
+  meta: z
+    .object({
+      human_description: z.string().optional().nullable(),
+      machine_description: z.string().optional().nullable(),
+      tags: z.array(z.string()).optional().nullable(),
+      docs: z.record(z.string()).optional().nullable(),
+    })
+    .optional()
+    .nullable(),
 })
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>
@@ -108,7 +117,7 @@ export function buildDiceRollerManifest(p: CreateDiceRollerParams): PluginManife
     execution: { deterministic: true, cacheable: true },
     side_effects: { network: 'none', disk: 'read_only', subprocess: 'forbidden' },
     resources: { gpu: 'forbidden', threads: 1 },
-    ui: { mode: 'schema', schema_file: 'ui/a2ui.yaml', bundle_file: 'ui/ui.bundle.js', sandbox: true },
+    ui: { mode: 'schema', schema_file: 'ui/declarative_ui.yaml', bundle_file: 'ui/ui.bundle.js', sandbox: true },
   }
 
   // Runtime validation; throws if invalid
@@ -208,7 +217,7 @@ export function buildCreatePluginToolArgsFromPython(args: {
       subprocess: args.sideEffects?.subprocess ?? 'forbidden',
     },
     resources: { gpu: 'forbidden', threads: args.threads ?? 1 },
-    ui: { mode: 'schema', schema_file: 'ui/a2ui.yaml', bundle_file: 'ui/ui.bundle.js', sandbox: true },
+    ui: { mode: 'schema', schema_file: 'ui/declarative_ui.yaml', bundle_file: 'ui/ui.bundle.js', sandbox: true },
   }
 
   PluginManifestSchema.parse(manifest)

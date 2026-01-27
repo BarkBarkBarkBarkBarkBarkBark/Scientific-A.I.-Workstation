@@ -3,6 +3,14 @@ name: "Template Plugin (Copy Me)"
 version: "0.1.0"
 description: "Reference implementation of a SAW plugin manifest + wrapper contract."
 category_path: "templates"
+meta:
+  human_description: "Copy this plugin folder to start a new workspace plugin. Edit plugin.yaml + wrapper.py + ui/declarative_ui.yaml."
+  machine_description: "Template plugin demonstrating: manifest fields, wrapper contract, safe IO patterns, and Declarative UI schema-mode UI."
+  tags: ["template", "example", "declarativeUi"]
+  docs:
+    readme: "README.md"
+    agent_context: "AGENT_CONTEXT.md"
+    declarative_ui_ui: "ui/declarative_ui.yaml"
 entrypoint:
   file: "wrapper.py"
   callable: "main"
@@ -45,7 +53,7 @@ resources:
 
 ui:
   mode: "schema"
-  schema_file: "ui/a2ui.yaml"
+  schema_file: "ui/declarative_ui.yaml"
   bundle_file: "ui/ui.bundle.js"
   sandbox: true
 

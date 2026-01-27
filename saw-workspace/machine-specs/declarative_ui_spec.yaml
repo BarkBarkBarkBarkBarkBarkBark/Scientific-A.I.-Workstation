@@ -1,4 +1,4 @@
-a2ui_spec_version: "0.1"
+declarative_ui_spec_version: "0.1"
 product: "SAW"
 goal: "Render plugin UIs as polished, consistent 'modules' using a declarative schema (no bespoke per-plugin DOM code required)."
 
@@ -8,7 +8,7 @@ principles:
   - "Escape hatch allowed: legacy UI bundles supported behind feature flag."
   - "State binding is explicit and auditable (node params, node runtime status, artifacts)."
   - "Composable layouts: panels, sections, tabs, grids, toolbars."
-  - "Incremental migration: support mixed A2UI + legacy per plugin."
+  - "Incremental migration: support mixed Declarative UI + legacy per plugin."
 
 runtime_contract:
   host_app:
@@ -130,7 +130,7 @@ component_registry:
     - "EmbeddedWebView"
 
 binding_language:
-  # Minimal expression system so A2UI can reference node params/runtime safely.
+  # Minimal expression system so Declarative UI can reference node params/runtime safely.
   expressions:
     - "${node.id}"
     - "${node.data.pluginId}"
@@ -145,19 +145,19 @@ binding_language:
     - "All filesystem/probing happens via explicit 'queries' below."
 
 ui_document:
-  # A plugin can ship either a2ui.yaml (this format) OR legacy ui bundle.
+  # A plugin can ship either declarativeUi.yaml (this format) OR legacy ui bundle.
   plugin_entrypoints:
     discovery:
-      - "plugins/<pluginId>/ui/a2ui.yaml"
+      - "plugins/<pluginId>/ui/declarative_ui.yaml"
       - "plugins/<pluginId>/ui/index.js  # legacy"
     precedence:
-      - "a2ui.yaml wins if present unless featureFlags.forceLegacyUi == true"
+      - "declarativeUi.yaml wins if present unless featureFlags.forceLegacyUi == true"
 
 feature_flags:
   forceLegacyUi: false
   allowLegacyUi: true
   allowEmbeddedWebView: true
-  enableA2uiDevTools: true
+  enableDeclarativeUiDevTools: true
 
 queries:
   # Declarative probes that update local 'uiState' without writing code in each plugin UI.
@@ -444,7 +444,7 @@ migration_plan:
     - id: "P0"
       name: "Introduce renderer + tokens"
       deliverables:
-        - "A2UI document loader (per plugin)"
+        - "Declarative UI document loader (per plugin)"
         - "Component registry + theming tokens"
         - "Binding engine (safe expressions)"
         - "Action dispatcher mapping to store funcs"
@@ -457,7 +457,7 @@ migration_plan:
       name: "Shim legacy UI"
       deliverables:
         - "Legacy ui/index.js continues to work behind allowLegacyUi flag"
-        - "Per-plugin opt-in: if a2ui.yaml exists, it takes precedence"
+        - "Per-plugin opt-in: if declarativeUi.yaml exists, it takes precedence"
       debt_controls:
         - "Add telemetry/logging: which plugins still use legacy"
         - "No new legacy UIs allowed (lint rule)"
@@ -465,7 +465,7 @@ migration_plan:
     - id: "P2"
       name: "Migrate top 5 plugins"
       deliverables:
-        - "Convert hand-built UIs to a2ui.yaml"
+        - "Convert hand-built UIs to declarativeUi.yaml"
         - "Validate parity: same actions/bindings/probes"
       debt_controls:
         - "Create reusable patterns: InputPanel, ActionPanel, Stepper"
@@ -474,7 +474,7 @@ migration_plan:
     - id: "P3"
       name: "Agent-assisted UI authoring"
       deliverables:
-        - "Optional agent tool: generate draft a2ui.yaml from plugin.yaml + wrapper signature"
+        - "Optional agent tool: generate draft declarativeUi.yaml from plugin.yaml + wrapper signature"
         - "Human review gate + visual diff preview"
       debt_controls:
         - "Generated UIs must only use allowed components"

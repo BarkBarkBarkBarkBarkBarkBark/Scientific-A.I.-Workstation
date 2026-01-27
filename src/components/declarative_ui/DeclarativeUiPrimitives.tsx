@@ -17,11 +17,11 @@ function gapClass(gap: Gap | undefined): string {
   }
 }
 
-export function A2uiStack(props: { gap?: Gap; children?: ReactNode }) {
+export function DeclarativeUiStack(props: { gap?: Gap; children?: ReactNode }) {
   return <div className={gapClass(props.gap)}>{props.children}</div>
 }
 
-export function A2uiRow(props: {
+export function DeclarativeUiRow(props: {
   justify?: 'start' | 'spaceBetween' | 'end'
   align?: 'start' | 'center' | 'end'
   children?: ReactNode
@@ -31,7 +31,7 @@ export function A2uiRow(props: {
   return <div className={['flex gap-2', justify, align].join(' ')}>{props.children}</div>
 }
 
-export function A2uiGrid(props: { columns?: number; gap?: Gap; children?: ReactNode }) {
+export function DeclarativeUiGrid(props: { columns?: number; gap?: Gap; children?: ReactNode }) {
   const cols = Math.max(1, Math.min(6, Math.round(props.columns ?? 1)))
   const gap = props.gap ?? 'sm'
   const gapCls = gap === 'xs' ? 'gap-1.5' : gap === 'sm' ? 'gap-2' : gap === 'lg' ? 'gap-5' : 'gap-3'
@@ -50,7 +50,7 @@ export function A2uiGrid(props: { columns?: number; gap?: Gap; children?: ReactN
   return <div className={['grid', colsCls, gapCls].join(' ')}>{props.children}</div>
 }
 
-export function A2uiText(props: { variant?: 'body' | 'muted' | 'title' | 'subtitle'; children?: ReactNode }) {
+export function DeclarativeUiText(props: { variant?: 'body' | 'muted' | 'title' | 'subtitle'; children?: ReactNode }) {
   const cls =
     props.variant === 'title'
       ? 'text-base font-semibold text-zinc-100'
@@ -62,7 +62,7 @@ export function A2uiText(props: { variant?: 'body' | 'muted' | 'title' | 'subtit
   return <div className={cls}>{props.children}</div>
 }
 
-export function A2uiPanel(props: {
+export function DeclarativeUiPanel(props: {
   title?: string
   variant?: 'default' | 'moduleHeader'
   collapsible?: boolean
@@ -94,7 +94,7 @@ export function A2uiPanel(props: {
   )
 }
 
-export function A2uiBadge(props: { kind?: 'neutral' | 'warn' | 'good' | 'bad'; children?: ReactNode }) {
+export function DeclarativeUiBadge(props: { kind?: 'neutral' | 'warn' | 'good' | 'bad'; children?: ReactNode }) {
   const cls =
     props.kind === 'warn'
       ? 'border-amber-700/50 bg-amber-900/20 text-amber-200'
@@ -106,7 +106,7 @@ export function A2uiBadge(props: { kind?: 'neutral' | 'warn' | 'good' | 'bad'; c
   return <span className={['inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold', cls].join(' ')}>{props.children}</span>
 }
 
-export function A2uiButton(props: { label: string; variant?: 'primary' | 'secondary'; disabled?: boolean; onClick?: () => void }) {
+export function DeclarativeUiButton(props: { label: string; variant?: 'primary' | 'secondary'; disabled?: boolean; onClick?: () => void }) {
   const base = 'rounded-md px-3 py-2 text-xs font-semibold transition'
   const cls =
     props.variant === 'primary'
@@ -125,7 +125,7 @@ export function A2uiButton(props: { label: string; variant?: 'primary' | 'second
   )
 }
 
-export function A2uiTextField(props: {
+export function DeclarativeUiTextField(props: {
   label: string
   placeholder?: string
   value: string
@@ -148,11 +148,15 @@ export function A2uiTextField(props: {
   )
 }
 
-export function A2uiToolbar(props: { columns?: number; gap?: Gap; children?: ReactNode }) {
-  return <A2uiGrid columns={props.columns ?? 2} gap={props.gap ?? 'sm'}>{props.children}</A2uiGrid>
+export function DeclarativeUiToolbar(props: { columns?: number; gap?: Gap; children?: ReactNode }) {
+  return (
+    <DeclarativeUiGrid columns={props.columns ?? 2} gap={props.gap ?? 'sm'}>
+      {props.children}
+    </DeclarativeUiGrid>
+  )
 }
 
-export function A2uiProgressSteps(props: { steps: { label: string; done: boolean }[] }) {
+export function DeclarativeUiProgressSteps(props: { steps: { label: string; done: boolean }[] }) {
   return (
     <div className="space-y-1">
       {props.steps.map((s, idx) => (
@@ -167,14 +171,14 @@ export function A2uiProgressSteps(props: { steps: { label: string; done: boolean
   )
 }
 
-export function A2uiInlineError(props: { visible?: boolean; message?: string }) {
+export function DeclarativeUiInlineError(props: { visible?: boolean; message?: string }) {
   if (!props.visible) return null
   const msg = (props.message ?? '').trim()
   if (!msg) return null
   return <div className="rounded-md border border-red-700/40 bg-red-900/15 px-3 py-2 text-[11px] text-red-200">{msg}</div>
 }
 
-export function A2uiCodeBlock(props: { language?: string; value: string }) {
+export function DeclarativeUiCodeBlock(props: { language?: string; value: string }) {
   return (
     <pre className="overflow-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-200">
       <code>{props.value}</code>
@@ -182,7 +186,7 @@ export function A2uiCodeBlock(props: { language?: string; value: string }) {
   )
 }
 
-export function A2uiList(props: { items: string[] }) {
+export function DeclarativeUiList(props: { items: string[] }) {
   const items = Array.isArray(props.items) ? props.items.filter((s) => String(s ?? '').trim()) : []
   if (items.length === 0) {
     return <div className="text-xs text-zinc-500">—</div>

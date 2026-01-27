@@ -677,6 +677,7 @@ class PluginListItem(BaseModel):
     origin: Literal["stock", "dev"] = "dev"
     integrity: dict[str, Any] | None = None
     ui: dict[str, Any] | None = None
+    meta: dict[str, Any] | None = None
     inputs: list[dict[str, Any]] = Field(default_factory=list)
     outputs: list[dict[str, Any]] = Field(default_factory=list)
     parameters: list[dict[str, Any]] = Field(default_factory=list)
@@ -759,6 +760,7 @@ def plugins_list() -> PluginListResponse:
                     origin=origin,
                     integrity=integrity,
                     ui=(m.ui.model_dump() if getattr(m, "ui", None) is not None else None),
+                    meta=(m.meta.model_dump() if getattr(m, "meta", None) is not None else None),
                     inputs=inputs,
                     outputs=outputs,
                     parameters=parameters,
@@ -794,22 +796,22 @@ def plugins_ui_schema(plugin_id: str) -> dict[str, Any]:
     if ui is None:
         raise HTTPException(status_code=404, detail="missing_ui_config")
     # NOTE: We allow serving schema YAML even when ui.mode is not "schema".
-    # This enables incremental migration (e.g., ship ui/a2ui.yaml alongside a legacy bundle).
+    # This enables incremental migration (e.g., ship ui/declarative_ui.yaml alongside a legacy bundle).
 
-    # A2UI discovery (incremental migration):
-    # Prefer plugins/<pluginId>/ui/a2ui.yaml when present.
+    # Declarative UI discovery (incremental migration):
+    # Prefer plugins/<pluginId>/ui/declarative_ui.yaml when present.
     # Otherwise fall back to the manifest-declared schema_file (default ui.yaml).
-    a2ui_candidates = ["ui/a2ui.yaml", "ui/a2ui.yml"]
+    declarative_ui_candidates = ["ui/declarative_ui.yaml", "ui/declarative_ui.yml"]
     schema_file = str(getattr(ui, "schema_file", "ui.yaml") or "ui.yaml")
 
     chosen_rel = schema_file
     chosen_kind = "schema"
-    for rel in a2ui_candidates:
+    for rel in declarative_ui_candidates:
         try:
             p = _safe_join_under_dir(plugin.plugin_dir, rel)
             if os.path.isfile(p):
                 chosen_rel = rel
-                chosen_kind = "a2ui"
+                chosen_kind = "declarativeUi"
                 break
         except HTTPException:
             # Ignore invalid paths; we only probe fixed internal candidates.
@@ -817,7 +819,17 @@ def plugins_ui_schema(plugin_id: str) -> dict[str, Any]:
 
     schema_path = _safe_join_under_dir(plugin.plugin_dir, chosen_rel)
     if not os.path.isfile(schema_path):
-        raise HTTPException(status_code=404, detail="schema_file_not_found")
+        # Back-compat: if callers defaulted to Declarative UI but a plugin still only ships legacy ui.yaml,
+        # transparently fall back.
+        if chosen_rel in {"ui/declarative_ui.yaml", "ui/declarative_ui.yml"}:
+            legacy_rel = "ui.yaml"
+            legacy_path = _safe_join_under_dir(plugin.plugin_dir, legacy_rel)
+            if os.path.isfile(legacy_path):
+                schema_path = legacy_path
+                chosen_rel = legacy_rel
+                chosen_kind = "schema"
+        if not os.path.isfile(schema_path):
+            raise HTTPException(status_code=404, detail="schema_file_not_found")
 
     try:
         raw = yaml.safe_load(open(schema_path, "r", encoding="utf-8"))
@@ -1139,14 +1151,14 @@ def plugins_create_from_python(req: PluginCreateFromPythonRequest) -> PluginCrea
         "resources": {"gpu": "forbidden", "threads": int(req.threads or 1)},
         "ui": {
             "mode": "schema",
-            "schema_file": "ui/a2ui.yaml",
+            "schema_file": "ui/declarative_ui.yaml",
             "bundle_file": "ui/ui.bundle.js",
             "sandbox": True,
         },
     }
 
     ui_schema = (
-        "a2ui_spec_version: '0.1'\n"
+        "declarative_ui_spec_version: '0.1'\n"
         "context:\n"
         "  defaults:\n"
         "    uiState: {}\n"
@@ -1163,7 +1175,7 @@ def plugins_create_from_python(req: PluginCreateFromPythonRequest) -> PluginCrea
         "      children:\n"
         "        - type: Text\n"
         "          props: { variant: muted }\n"
-        "          text: 'Edit ui/a2ui.yaml to customize this UI.'\n"
+        "          text: 'Edit ui/declarative_ui.yaml to customize this UI.'\n"
         "    - type: NodeInputs\n"
         "    - type: NodeParameters\n"
         "    - type: NodeRunPanel\n"
@@ -1173,7 +1185,7 @@ def plugins_create_from_python(req: PluginCreateFromPythonRequest) -> PluginCrea
         os.makedirs(plugin_dir, exist_ok=False)
         os.makedirs(os.path.join(plugin_dir, "ui"), exist_ok=True)
         _write_text(os.path.join(plugin_dir, "wrapper.py"), wrapper)
-        _write_text(os.path.join(plugin_dir, "ui", "a2ui.yaml"), ui_schema)
+        _write_text(os.path.join(plugin_dir, "ui", "declarative_ui.yaml"), ui_schema)
         with open(os.path.join(plugin_dir, "plugin.yaml"), "w", encoding="utf-8") as f:
             yaml.safe_dump(manifest, f, sort_keys=False)
     except FileExistsError:

@@ -8,6 +8,24 @@ If you are an agent (or a tool) creating new plugins, use this as the reference 
 - safe path handling for workspace-relative paths
 - writing run artifacts under `SAW_RUN_DIR/output/` (and returning only output-relative paths)
 
+## UI (Declarative UI default)
+
+New plugins should ship an **Declarative UI** declarative UI document at:
+
+- `ui/declarative_ui.yaml`
+
+And set in `plugin.yaml`:
+
+```yaml
+ui:
+  mode: schema
+  schema_file: ui/declarative_ui.yaml
+  bundle_file: ui/ui.bundle.js
+  sandbox: true
+```
+
+The legacy schema UI file (`ui.yaml` with `version: 1` + `sections:`) is deprecated.
+
 ## Ground rules (to avoid breaking plugin discovery)
 
 SAW plugin discovery is strict: **any invalid `plugin.yaml` can break indexing**.

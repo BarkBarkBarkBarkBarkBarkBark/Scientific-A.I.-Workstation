@@ -1,6 +1,6 @@
-import type { A2uiDocument, A2uiExpr } from '../a2uiTypes'
+import type { DeclarativeUiDocument, DeclarativeUiExpr } from '../declarativeUiTypes'
 
-export type A2uiRenderContext = {
+export type DeclarativeUiRenderContext = {
   nodeId: string
   pluginId: string
 
@@ -8,11 +8,11 @@ export type A2uiRenderContext = {
   node: any
   computed: Record<string, any>
   uiState: Record<string, any>
-  document: A2uiDocument
+  document: DeclarativeUiDocument
 
   // Dispatch surface
   dispatch: (args: { action: string; event?: any }) => void
 
   // Helpers
-  eval: (expr: A2uiExpr) => any
+  eval: (expr: DeclarativeUiExpr) => any
 }

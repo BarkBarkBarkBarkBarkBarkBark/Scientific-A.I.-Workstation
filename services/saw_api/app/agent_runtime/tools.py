@@ -163,7 +163,7 @@ def tool_create_plugin(*, manifest: dict[str, Any], wrapper_code: str, readme: s
     out2 = tool_safe_write(os.path.join(plugin_dir, "wrapper.py"), str(wrapper_code or ""))
     out3 = tool_safe_write(os.path.join(plugin_dir, "README.md"), str(readme or ""))
 
-    # Default to the A2UI workflow for newly created plugins when requested by the manifest.
+    # Default to the Declarative UI workflow for newly created plugins when requested by the manifest.
     # This is intentionally minimal: it includes host-builtins for inputs/params/run.
     ui_spec = (manifest or {}).get("ui") if isinstance(manifest, dict) else None
     schema_file = ""
@@ -173,11 +173,11 @@ def tool_create_plugin(*, manifest: dict[str, Any], wrapper_code: str, readme: s
     except Exception:
         schema_file = ""
 
-    if schema_file in {"ui/a2ui.yaml", "ui/a2ui.yml"}:
+    if schema_file in {"ui/declarative_ui.yaml", "ui/declarative_ui.yaml"}:
         tool_safe_write(
             os.path.join(plugin_dir, schema_file),
             (
-                "a2ui_spec_version: '0.1'\n"
+                "declarative_ui_spec_version: '0.1'\n"
                 "context:\n"
                 "  defaults:\n"
                 "    uiState: {}\n"
@@ -194,7 +194,7 @@ def tool_create_plugin(*, manifest: dict[str, Any], wrapper_code: str, readme: s
                 "      children:\n"
                 "        - type: Text\n"
                 "          props: { variant: muted }\n"
-                "          text: 'Edit ui/a2ui.yaml to customize this UI.'\n"
+                "          text: 'Edit ui/declarative_ui.yaml to customize this UI.'\n"
                 "    - type: NodeInputs\n"
                 "    - type: NodeParameters\n"
                 "    - type: NodeRunPanel\n"

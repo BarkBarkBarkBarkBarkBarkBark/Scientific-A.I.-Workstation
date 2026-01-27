@@ -1,6 +1,6 @@
-import type { A2uiExpr } from '../a2uiTypes'
+import type { DeclarativeUiExpr } from '../declarativeUiTypes'
 
-export type A2uiEvalContext = {
+export type DeclarativeUiEvalContext = {
   node?: any
   computed?: Record<string, any>
   uiState?: Record<string, any>
@@ -19,7 +19,7 @@ function toStringSafe(v: any): string {
   return String(v)
 }
 
-function resolvePath(path: string, ctx: A2uiEvalContext): any {
+function resolvePath(path: string, ctx: DeclarativeUiEvalContext): any {
   const trimmed = path.trim()
   if (!trimmed) return undefined
 
@@ -89,8 +89,8 @@ function num(v: any): number {
   return Number.isFinite(n) ? n : NaN
 }
 
-export function evalExpr(expr: A2uiExpr, ctx: A2uiEvalContext, depth = 0): any {
-  if (depth > MAX_DEPTH) throw new Error('a2ui_eval_max_depth')
+export function evalExpr(expr: DeclarativeUiExpr, ctx: DeclarativeUiEvalContext, depth = 0): any {
+  if (depth > MAX_DEPTH) throw new Error('declarative_ui_eval_max_depth')
 
   if (expr == null) return null
   if (typeof expr === 'number' || typeof expr === 'boolean') return expr
@@ -203,6 +203,6 @@ export function evalExpr(expr: A2uiExpr, ctx: A2uiEvalContext, depth = 0): any {
     }
 
     default:
-      throw new Error(`a2ui_unknown_op:${op}`)
+      throw new Error(`declarative_ui_unknown_op:${op}`)
   }
 }

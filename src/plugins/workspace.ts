@@ -11,6 +11,7 @@ export type WorkspacePluginListItem = {
   origin?: 'stock' | 'dev'
   integrity?: { expected: string; actual: string; restored: boolean } | null
   ui?: { mode?: 'schema' | 'bundle'; schema_file?: string; bundle_file?: string; sandbox?: boolean } | null
+  meta?: Record<string, any> | null
   inputs?: Array<{ id: string; name: string; type: string }>
   outputs?: Array<{ id: string; name: string; type: string }>
   parameters?: Array<{ id: string; label: string; kind: 'text' | 'number' | 'select'; default: any; options?: string[]; min?: number; max?: number }>
@@ -57,7 +58,8 @@ export async function fetchWorkspacePlugins(apiBase = 'http://127.0.0.1:5127'): 
       sourcePaths,
       locked: Boolean(p.locked),
       origin: p.origin === 'stock' ? 'stock' : 'dev',
-      integrity: p.integrity ?? null,
+        integrity: p.integrity ?? null,
+        meta: (p.meta && typeof p.meta === 'object') ? p.meta : null,
       ui:
         p.ui && (p.ui.mode === 'schema' || p.ui.mode === 'bundle')
           ? {

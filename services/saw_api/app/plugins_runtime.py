@@ -61,10 +61,19 @@ class PluginUiSpec(BaseModel):
     # - schema: server parses schema_file (YAML) and frontend renders built-in controls.
     # - bundle: server serves bundle_file (prebuilt JS) and frontend executes it (workspace-only by default).
     mode: Literal["schema", "bundle"] = "schema"
-    schema_file: str = "ui.yaml"
+    schema_file: str = "ui/declarative_ui.yaml"
     bundle_file: str = "ui/ui.bundle.js"
     # When true, bundle mode is restricted to non-stock (workspace/dev) plugins.
     sandbox: bool = True
+
+
+class PluginMeta(BaseModel):
+    # Optional descriptive metadata.
+    # This is intentionally human-friendly while remaining machine-readable.
+    human_description: str | None = None
+    machine_description: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    docs: dict[str, str] | None = None
 
 
 class PluginManifest(BaseModel):
@@ -84,6 +93,7 @@ class PluginManifest(BaseModel):
     side_effects: SideEffectsSpec
     resources: ResourcesSpec
     ui: PluginUiSpec | None = None
+    meta: PluginMeta | None = None
 
 
 @dataclass(frozen=True)

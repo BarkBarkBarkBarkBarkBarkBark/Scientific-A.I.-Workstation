@@ -13,6 +13,8 @@ def system_prompt() -> str:
         "- If the user mentions the word 'plugin' but it is ambiguous whether they want a NEW plugin or help with an existing one, ask: 'Do you want me to build a new plugin?' before taking action.\n"
         "- If the user asks to CREATE A SAW PLUGIN (new plugin/plugin.yaml/wrapper.py):\n"
         "  - Read saw-workspace/plugins/saw.template.plugin/AGENT_CONTEXT.md and src/agent/actions/createPlugin.ts for the canonical manifest shape.\n"
+        "  - UI policy: New plugins MUST use Declarative UI (schema mode). Set ui: { mode: schema, schema_file: ui/declarative_ui.yaml, bundle_file: ui/ui.bundle.js, sandbox: true }.\n"
+        "    Do NOT generate legacy UI schema files with {version: 1, sections: ...}; that workflow is deprecated.\n"
         "  - Call validate_plugin_manifest(manifest=...) first (read-only).\n"
         "  - If valid, call create_plugin(manifest=..., wrapper_code=..., readme=...).\n"
         "  - Do NOT write ad-hoc plugin files into the repo root or outside saw-workspace/plugins/<id>/.\n"

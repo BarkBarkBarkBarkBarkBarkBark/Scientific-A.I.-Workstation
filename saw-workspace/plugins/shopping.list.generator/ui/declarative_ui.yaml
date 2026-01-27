@@ -1,4 +1,4 @@
-a2ui_spec_version: "0.1"
+declarative_ui_spec_version: "0.1"
 kind: "PluginModule"
 pluginId: "shopping.list.generator"
 title: "Shopping List"

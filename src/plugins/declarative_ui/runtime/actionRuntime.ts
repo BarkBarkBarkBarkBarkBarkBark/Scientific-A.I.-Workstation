@@ -1,25 +1,25 @@
 import { evalExpr } from '../bindings/evalExpr'
 
-export type A2uiActionDef = {
+export type DeclarativeUiActionDef = {
   id: string
   kind: string
   input?: any
   steps?: any[]
 }
 
-export type A2uiActionHost = {
+export type DeclarativeUiActionHost = {
   updateNodeParam: (nodeId: string, key: string, value: any) => void
   updateNodeInput: (nodeId: string, key: string, value: any) => void
   runPluginNode: (nodeId: string) => Promise<{ ok: boolean; error?: string }>
   log?: (msg: string) => void
 }
 
-export async function dispatchA2uiAction(params: {
+export async function dispatchDeclarativeUiAction(params: {
   actionIdOrKind: string
   event?: any
   document: any
   bindings: { node: any; computed: any; uiState: any; document: any }
-  host: A2uiActionHost
+  host: DeclarativeUiActionHost
   onLastAction?: (info: { action: string; event?: any }) => void
 }): Promise<void> {
   const actionId = String(params.actionIdOrKind ?? '').trim()
@@ -27,7 +27,7 @@ export async function dispatchA2uiAction(params: {
 
   params.onLastAction?.({ action: actionId, event: params.event })
 
-  const defs: A2uiActionDef[] = Array.isArray(params.document?.actions) ? params.document.actions : []
+  const defs: DeclarativeUiActionDef[] = Array.isArray(params.document?.actions) ? params.document.actions : []
   const def = defs.find((a) => a && typeof a === 'object' && a.id === actionId) ?? null
 
   // If it isn't a document-defined action, treat it as a host action kind.
@@ -59,9 +59,9 @@ export async function dispatchA2uiAction(params: {
 async function execStep(
   step: any,
   runtime: {
-  evalWithEvent: (expr: any) => any
-  host: A2uiActionHost
-  nodeFallbackId?: string
+    evalWithEvent: (expr: any) => any
+    host: DeclarativeUiActionHost
+    nodeFallbackId?: string
   },
 ): Promise<void> {
   if (!step || typeof step !== 'object') return
@@ -121,7 +121,7 @@ async function execStep(
   if (kind === 'ui.toast') {
     const input = evalWithEvent(inputExpr)
     const msg = String(input?.message ?? '').trim()
-    if (msg) host.log?.(`[a2ui] ${msg}`)
+    if (msg) host.log?.(`[declarative_ui] ${msg}`)
     return
   }
 

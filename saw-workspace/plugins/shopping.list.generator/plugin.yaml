@@ -27,5 +27,5 @@ resources:
 
 ui:
   mode: schema
-  schema_file: "ui/a2ui.yaml"
+  schema_file: "ui/declarative_ui.yaml"
   sandbox: true

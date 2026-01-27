@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { dispatchA2uiAction } from '../actionRuntime'
+import { dispatchDeclarativeUiAction } from '../actionRuntime'
 
-describe('dispatchA2uiAction', () => {
+describe('dispatchDeclarativeUiAction', () => {
   it('executes sequence + conditional runStep from doc', async () => {
     const calls: any[] = []
 
@@ -45,7 +45,7 @@ describe('dispatchA2uiAction', () => {
 
     const bindings = { node: { id: 'n1' }, computed: {}, uiState: {}, document }
 
-    await dispatchA2uiAction({
+    await dispatchDeclarativeUiAction({
       actionIdOrKind: 'runStep',
       event: { step: 'upload' },
       document,
@@ -60,7 +60,7 @@ describe('dispatchA2uiAction', () => {
 
     calls.length = 0
 
-    await dispatchA2uiAction({
+    await dispatchDeclarativeUiAction({
       actionIdOrKind: 'runStep',
       event: { step: 'sort' },
       document,

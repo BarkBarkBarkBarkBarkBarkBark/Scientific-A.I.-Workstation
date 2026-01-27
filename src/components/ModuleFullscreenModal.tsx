@@ -11,7 +11,7 @@ import { NodeRunPanel } from './inspector/NodeRunPanel'
 import { fetchDevTree, type DevTreeNode } from '../dev/runtimeTree'
 import { SchemaPluginUi } from './plugin_ui/SchemaPluginUi'
 import { BundlePluginUi } from './plugin_ui/BundlePluginUi'
-import { getA2uiFeatureFlags } from '../plugins/a2ui/featureFlags'
+import { getDeclarativeUiFeatureFlags } from '../plugins/declarative_ui/featureFlags'
 
 type TreeNode =
   | { kind: 'dir'; name: string; path: string; children: TreeNode[] }
@@ -227,7 +227,7 @@ export function ModuleFullscreenModal() {
               <div className="h-full overflow-auto p-3">
                 <div className="space-y-3">
                   {(() => {
-                    const flags = getA2uiFeatureFlags()
+                    const flags = getDeclarativeUiFeatureFlags()
 
                     if (plugin.ui?.mode === 'schema') {
                       if (flags.allowLegacyUi && flags.forceLegacyUi) {

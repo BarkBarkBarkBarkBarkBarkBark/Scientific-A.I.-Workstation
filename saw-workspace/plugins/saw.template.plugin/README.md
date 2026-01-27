@@ -6,7 +6,7 @@ Copy this folder to create a new SAW plugin.
 
 - `plugin.yaml`: manifest (id/name/version/io/env/side-effects/resources)
 - `wrapper.py`: exports `main(inputs, params, context) -> dict`
-- `ui/a2ui.yaml`: declarative UI document for the fullscreen module view
+- `ui/declarative_ui.yaml`: declarative UI document for the fullscreen module view
 
 ## Quick copy checklist
 
@@ -28,19 +28,19 @@ Copy this folder to create a new SAW plugin.
 - Run directory (if present): `SAW_RUN_DIR`
 - For user-provided paths, validate they are workspace-relative (see `_safe_join_under`).
 
-## UI (schema mode, A2UI)
+## UI (schema mode, Declarative UI)
 
-This plugin uses the A2UI declarative renderer (schema mode). In `plugin.yaml`:
+This plugin uses the Declarative UI declarative renderer (schema mode). In `plugin.yaml`:
 
 ```yaml
 ui:
   mode: "schema"
-  schema_file: "ui/a2ui.yaml"
+  schema_file: "ui/declarative_ui.yaml"
   bundle_file: "ui/ui.bundle.js"
   sandbox: true
 ```
 
-And the schema file `ui/a2ui.yaml` controls what the fullscreen module shows.
+And the schema file `ui/declarative_ui.yaml` controls what the fullscreen module shows.
 
 ## UI (bundle mode, advanced)
 

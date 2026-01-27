@@ -140,7 +140,7 @@ export function PluginBuilderModal(props: { open: boolean; onClose: () => void }
   const wrapperPath = useMemo(() => (pluginDir ? `${pluginDir}/wrapper.py` : ''), [pluginDir])
   const scriptPath = useMemo(() => (pluginDir ? `${pluginDir}/src/script.py` : ''), [pluginDir])
   const initPath = useMemo(() => (pluginDir ? `${pluginDir}/src/__init__.py` : ''), [pluginDir])
-  const a2uiPath = useMemo(() => (pluginDir ? `${pluginDir}/ui/a2ui.yaml` : ''), [pluginDir])
+  const declarativeUiPath = useMemo(() => (pluginDir ? `${pluginDir}/ui/declarative_ui.yaml` : ''), [pluginDir])
 
   const pluginYaml = useMemo(() => {
     const lines: string[] = []
@@ -187,16 +187,16 @@ export function PluginBuilderModal(props: { open: boolean; onClose: () => void }
     lines.push('  threads: 2')
     lines.push('ui:')
     lines.push('  mode: "schema"')
-    lines.push('  schema_file: "ui/a2ui.yaml"')
+    lines.push('  schema_file: "ui/declarative_ui.yaml"')
     lines.push('  bundle_file: "ui/ui.bundle.js"')
     lines.push('  sandbox: true')
     lines.push('')
     return lines.join('\n')
   }, [categoryPath, description, name, pipList, pluginId])
 
-  const a2uiYaml = useMemo(() => {
+  const declarativeUiYaml = useMemo(() => {
     return [
-      "a2ui_spec_version: '0.1'",
+      "declarative_ui_spec_version: '0.1'",
       'context:',
       '  defaults:',
       '    uiState: {}',
@@ -213,7 +213,7 @@ export function PluginBuilderModal(props: { open: boolean; onClose: () => void }
       '      children:',
       '        - type: Text',
       '          props: { variant: muted }',
-      "          text: 'Edit ui/a2ui.yaml to customize this UI.'",
+      "          text: 'Edit ui/declarative_ui.yaml to customize this UI.'",
       '    - type: NodeInputs',
       '    - type: NodeParameters',
       '    - type: NodeRunPanel',
@@ -250,11 +250,11 @@ export function PluginBuilderModal(props: { open: boolean; onClose: () => void }
     return [
       newFilePatch(manifestPath, pluginYaml),
       newFilePatch(wrapperPath, wrapperPy),
-      newFilePatch(a2uiPath, a2uiYaml),
+      newFilePatch(declarativeUiPath, declarativeUiYaml),
       newFilePatch(initPath, ''),
       newFilePatch(scriptPath, script),
     ].join('\n')
-  }, [a2uiPath, a2uiYaml, initPath, manifestPath, pluginDir, pluginYaml, script, scriptPath, wrapperPath, wrapperPy])
+  }, [declarativeUiPath, declarativeUiYaml, initPath, manifestPath, pluginDir, pluginYaml, script, scriptPath, wrapperPath, wrapperPy])
 
   if (!open) return null
 

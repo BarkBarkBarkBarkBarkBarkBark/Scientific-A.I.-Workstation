@@ -1,10 +1,10 @@
-# A2UI (Declarative Plugin UI) — Deployment Guide
+# Declarative UI (Declarative Plugin UI) — Deployment Guide
 
-This document describes how to deploy **A2UI-style declarative UIs** for SAW workspace plugins.
+This document describes how to deploy **Declarative UI-style declarative UIs** for SAW workspace plugins.
 
 ## What it is
 
-- A2UI is a **YAML/JSON declarative UI document** rendered by the frontend.
+- Declarative UI is a **YAML/JSON declarative UI document** rendered by the frontend.
 - It is designed to be **safe-by-default**: no arbitrary JavaScript execution from YAML.
 - Rendering uses a **host-owned component registry** (plugins cannot inject arbitrary Tailwind classes).
 
@@ -14,10 +14,10 @@ For a workspace plugin at:
 
 - `saw-workspace/plugins/<plugin_id>/`
 
-Place your A2UI document at one of:
+Place your Declarative UI document at one of:
 
-- `saw-workspace/plugins/<plugin_id>/ui/a2ui.yaml`
-- `saw-workspace/plugins/<plugin_id>/ui/a2ui.yml`
+- `saw-workspace/plugins/<plugin_id>/ui/declarative_ui.yaml`
+- `saw-workspace/plugins/<plugin_id>/ui/declarative_ui.yml`
 
 ### Plugin manifest (`plugin.yaml`)
 
@@ -26,18 +26,18 @@ Use schema UI mode:
 ```yaml
 ui:
   mode: schema
-  schema_file: ui/a2ui.yaml
+  schema_file: ui/declarative_ui.yaml
 ```
 
 Notes:
-- The backend schema endpoint prefers `ui/a2ui.yaml`/`.yml` when present.
+- The backend schema endpoint prefers `ui/declarative_ui.yaml`/`.yml` when present.
 - `schema_file` is still supported for backwards compatibility and explicitness.
 
 ## Runtime wiring (what happens at runtime)
 
 1. Frontend requests: `GET /api/saw/plugins/ui/schema/<plugin_id>`
 2. Backend loads YAML (safe parser) and returns JSON.
-3. Frontend detects A2UI by `a2ui_spec_version` and validates it.
+3. Frontend detects Declarative UI by `declarative_ui_spec_version` and validates it.
 4. Frontend renders the `view` tree via the strict registry.
 5. Optional document pieces:
    - `computed`: derived bindings
@@ -50,17 +50,17 @@ Notes:
 Minimum:
 
 ```yaml
-a2ui_spec_version: "0.1"
+declarative_ui_spec_version: "0.1"
 view:
   component: Stack
   children:
     - component: Text
       props:
-        text: "Hello A2UI"
+        text: "Hello Declarative UI"
 ```
 
 Common top-level keys:
-- `a2ui_spec_version` (required)
+- `declarative_ui_spec_version` (required)
 - `context.defaults.uiState` (optional)
 - `computed` (optional)
 - `queries` (optional)
@@ -198,23 +198,23 @@ lifecycle:
 
 A working example document exists here:
 
-- `saw-workspace/plugins/zlab_sort/ui/a2ui.yaml`
+- `saw-workspace/plugins/zlab_sort/ui/declarative_ui.yaml`
 
 Key runtime code:
 
 - Frontend loader + detection: `src/components/plugin_ui/SchemaPluginUi.tsx`
-- Renderer + primitives: `src/plugins/a2ui/**` and `src/components/a2ui/A2uiPrimitives.tsx`
-- Action runtime: `src/plugins/a2ui/runtime/actionRuntime.ts`
-- Query runtime: `src/plugins/a2ui/runtime/queryRuntime.ts`
+- Renderer + primitives: `src/plugins/declarative_ui/**` and `src/components/declarative_ui/DeclarativeUiPrimitives.tsx`
+- Action runtime: `src/plugins/declarative_ui/runtime/actionRuntime.ts`
+- Query runtime: `src/plugins/declarative_ui/runtime/queryRuntime.ts`
 
 ## Troubleshooting checklist
 
-- A2UI not detected:
-  - Ensure `a2ui_spec_version: "0.1"` is present.
+- Declarative UI not detected:
+  - Ensure `declarative_ui_spec_version: "0.1"` is present.
   - Ensure the plugin UI is `mode: schema`.
 - UI renders but buttons do nothing:
   - Verify action ids match exactly (case-sensitive).
-  - Check DeveloperPanel → **A2UI Dev** snapshots for `lastAction` and `lastActionErr`.
+  - Check DeveloperPanel → **Declarative UI Dev** snapshots for `lastAction` and `lastActionErr`.
 - Probes always false:
   - Confirm Patch Engine is running and read caps allow the probed paths.
   - Check DeveloperPanel caps UI for the relevant directory.

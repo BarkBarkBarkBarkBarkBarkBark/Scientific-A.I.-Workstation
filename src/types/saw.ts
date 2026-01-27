@@ -47,6 +47,7 @@ export type PluginDefinition = {
   origin?: 'stock' | 'dev'
   integrity?: { expected: string; actual: string; restored: boolean } | null
   ui?: PluginUiConfig | null
+  meta?: Record<string, any> | null
   inputs: Port[]
   outputs: Port[]
   parameters: PluginParameterDefinition[]

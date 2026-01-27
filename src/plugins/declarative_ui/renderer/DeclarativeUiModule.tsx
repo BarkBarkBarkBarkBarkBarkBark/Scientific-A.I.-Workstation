@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { A2uiDocument } from '../a2uiTypes'
+import type { DeclarativeUiDocument } from '../declarativeUiTypes'
 import { evalExpr } from '../bindings/evalExpr'
-import { computeComputedValues, renderA2uiView } from './renderA2ui'
-import { createDefaultA2uiRegistry } from '../registry/defaultRegistry'
+import { computeComputedValues, renderDeclarativeUiView } from './renderDeclarativeUi'
+import { createDefaultDeclarativeUiRegistry } from '../registry/defaultRegistry'
 import { useSawStore } from '../../../store/useSawStore'
-import { dispatchA2uiAction } from '../runtime/actionRuntime'
-import { runQueries as runQueriesRuntime, type A2uiQueryDef } from '../runtime/queryRuntime'
+import { dispatchDeclarativeUiAction } from '../runtime/actionRuntime'
+import { runQueries as runQueriesRuntime, type DeclarativeUiQueryDef } from '../runtime/queryRuntime'
 
 type UiState = Record<string, any>
 
-// A2UI module host. Renders the document view and wires actions/queries to host capabilities.
-export function A2uiModule(props: { nodeId: string; pluginId: string; document: A2uiDocument }) {
+// Declarative UI module host. Renders the document view and wires actions/queries to host capabilities.
+export function DeclarativeUiModule(props: { nodeId: string; pluginId: string; document: DeclarativeUiDocument }) {
   const node = useSawStore((s) => s.nodes.find((n) => n.id === props.nodeId) ?? null)
   const updateNodeParam = useSawStore((s) => s.updateNodeParam)
   const updateNodeInput = useSawStore((s) => s.updateNodeInput)
   const runPluginNode = useSawStore((s) => s.runPluginNode)
-  const a2uiDevEnabled = useSawStore((s) => s.a2uiDev.enabled)
-  const setA2uiDevSnapshot = useSawStore((s) => s.setA2uiDevSnapshot)
+  const declarativeUiDevEnabled = useSawStore((s) => s.declarativeUiDev.enabled)
+  const setDeclarativeUiDevSnapshot = useSawStore((s) => s.setDeclarativeUiDevSnapshot)
 
   const [uiState, setUiState] = useState<UiState>({})
   const [lastActionErr, setLastActionErr] = useState<string>('')
@@ -42,11 +42,11 @@ export function A2uiModule(props: { nodeId: string; pluginId: string; document: 
             },
           },
     )
-      }, [props.nodeId, props.document])
+  }, [props.nodeId, props.document])
 
-      useEffect(() => {
-        uiStateRef.current = uiState
-      }, [uiState])
+  useEffect(() => {
+    uiStateRef.current = uiState
+  }, [uiState])
 
   const computed = useMemo(() => {
     return computeComputedValues({
@@ -55,7 +55,7 @@ export function A2uiModule(props: { nodeId: string; pluginId: string; document: 
     })
   }, [props.document, node, uiState])
 
-  const registry = useMemo(() => createDefaultA2uiRegistry(), [])
+  const registry = useMemo(() => createDefaultDeclarativeUiRegistry(), [])
 
   const queryDefs = useMemo(() => {
     const raw = (props.document as any).queries
@@ -72,9 +72,9 @@ export function A2uiModule(props: { nodeId: string; pluginId: string; document: 
           kind,
           input: (q as any).input ?? {},
           output: (q as any).output ?? {},
-        } as A2uiQueryDef
+        } as DeclarativeUiQueryDef
       })
-      .filter(Boolean) as A2uiQueryDef[]
+      .filter(Boolean) as DeclarativeUiQueryDef[]
   }, [props.document])
 
   const runQueriesById = async (ids: string[]) => {
@@ -111,7 +111,7 @@ export function A2uiModule(props: { nodeId: string; pluginId: string; document: 
             }
           }
 
-          await dispatchA2uiAction({
+          await dispatchDeclarativeUiAction({
             actionIdOrKind: action,
             event,
             document: props.document,
@@ -219,14 +219,14 @@ export function A2uiModule(props: { nodeId: string; pluginId: string; document: 
   }, bindingDeps)
 
   if (!node) {
-    return <div className="text-xs text-zinc-500">A2UI: node not found</div>
+    return <div className="text-xs text-zinc-500">Declarative UI: node not found</div>
   }
 
-  const rendered = renderA2uiView({ root: props.document.view, ctx, registry })
+  const rendered = renderDeclarativeUiView({ root: props.document.view, ctx, registry })
 
   useEffect(() => {
-    if (!a2uiDevEnabled) return
-    setA2uiDevSnapshot({
+    if (!declarativeUiDevEnabled) return
+    setDeclarativeUiDevSnapshot({
       ts: Date.now(),
       nodeId: props.nodeId,
       pluginId: props.pluginId,
@@ -235,12 +235,12 @@ export function A2uiModule(props: { nodeId: string; pluginId: string; document: 
       lastAction: lastActionRef.current,
       lastQueries: lastQueriesRef.current,
     })
-  }, [a2uiDevEnabled, setA2uiDevSnapshot, props.nodeId, props.pluginId, computed, uiState])
+  }, [declarativeUiDevEnabled, setDeclarativeUiDevSnapshot, props.nodeId, props.pluginId, computed, uiState])
 
   return (
     <div className="space-y-3 rounded-md border border-sky-400/70 bg-sky-950/10 p-3">
-      {lastActionErr ? <div className="text-[11px] text-red-300">A2UI action error: {lastActionErr}</div> : null}
-      {lastQueryErr ? <div className="text-[11px] text-red-300">A2UI query error: {lastQueryErr}</div> : null}
+      {lastActionErr ? <div className="text-[11px] text-red-300">Declarative UI action error: {lastActionErr}</div> : null}
+      {lastQueryErr ? <div className="text-[11px] text-red-300">Declarative UI query error: {lastQueryErr}</div> : null}
       {rendered}
     </div>
   )

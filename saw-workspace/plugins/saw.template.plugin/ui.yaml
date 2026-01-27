@@ -1,5 +1,13 @@
+### DEPRECATED ###
+# This is the legacy schema UI format (version: 1 / sections).
+# New plugins MUST use Declarative UI at: ui/declarative_ui.yaml
+# This file remains only for backward compatibility.
+
 version: 1
 sections:
+  - type: text
+    tone: muted
+    text: "DEPRECATED UI: This plugin now uses ui/declarative_ui.yaml."
   - type: builtin
     component: node_inputs
   - type: builtin

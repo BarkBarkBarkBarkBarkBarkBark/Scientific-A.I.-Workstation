@@ -2,7 +2,7 @@ import { fetchDevFile, fetchDevTree } from '../../../dev/runtimeTree'
 import { evalExpr } from '../bindings/evalExpr'
 import { getIntoPath, setByPath } from './uiState'
 
-export type A2uiQueryDef = {
+export type DeclarativeUiQueryDef = {
   id: string
   kind: 'fsTreeSearch' | 'fsDirNonEmpty' | 'fsFileExists'
   input: any
@@ -10,7 +10,7 @@ export type A2uiQueryDef = {
 }
 
 export async function runQueries(params: {
-  queryDefs: A2uiQueryDef[]
+  queryDefs: DeclarativeUiQueryDef[]
   ids: string[]
   bindings: { node: any; computed: any; uiState: any; document: any }
   setUiState: (next: any) => void

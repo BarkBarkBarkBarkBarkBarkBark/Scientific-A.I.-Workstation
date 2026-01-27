@@ -3,7 +3,7 @@ import type { PluginDefinition, PluginNode } from '../types/saw'
 import type { AiStatus } from '../types/ai'
 import type { AgentToolCall, ChatMessage } from '../ai/client'
 import type { PatchProposal } from '../types/patch'
-import type { A2uiDevSnapshot } from './slices/a2uiDevSlice'
+import type { DeclarativeUiDevSnapshot } from './slices/declarative_uiDevSlice'
 
 export type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo' | 'terminal'
 export type LayoutMode = 'pipeline' | 'graph'
@@ -77,8 +77,8 @@ export type SawState = {
   workspacePlugins: PluginDefinition[]
   pluginCatalog: PluginDefinition[]
 
-  // A2UI DevTools
-  a2uiDev: { enabled: boolean; snapshots: Record<string, A2uiDevSnapshot> }
+  // Declarative UI DevTools
+  declarativeUiDev: { enabled: boolean; snapshots: Record<string, DeclarativeUiDevSnapshot> }
 
   // Actions
   refreshWorkspacePlugins: () => Promise<void>
@@ -110,9 +110,9 @@ export type SawState = {
   openFullscreen: (nodeId: string) => void
   closeFullscreen: () => void
 
-  setA2uiDevEnabled: (enabled: boolean) => void
-  setA2uiDevSnapshot: (snap: A2uiDevSnapshot) => void
-  clearA2uiDevSnapshots: () => void
+  setDeclarativeUiDevEnabled: (enabled: boolean) => void
+  setDeclarativeUiDevSnapshot: (snap: DeclarativeUiDevSnapshot) => void
+  clearDeclarativeUiDevSnapshots: () => void
 
   refreshAiStatus: () => Promise<void>
   submitGoal: (goal: string) => Promise<void>

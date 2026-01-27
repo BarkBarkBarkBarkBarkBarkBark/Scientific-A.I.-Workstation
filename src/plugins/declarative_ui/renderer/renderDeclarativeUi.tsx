@@ -1,12 +1,12 @@
 import * as React from 'react'
 import type { ReactNode } from 'react'
-import type { A2uiViewNode } from '../a2uiTypes'
+import type { DeclarativeUiViewNode } from '../declarativeUiTypes'
 import { evalExpr } from '../bindings/evalExpr'
-import type { A2uiRenderContext } from './types'
-import type { A2uiRegistry } from '../registry/registry'
+import type { DeclarativeUiRenderContext } from './types'
+import type { DeclarativeUiRegistry } from '../registry/registry'
 import { getRegistryComponent } from '../registry/registry'
 
-export function makeEval(ctx: Omit<A2uiRenderContext, 'eval'>) {
+export function makeEval(ctx: Omit<DeclarativeUiRenderContext, 'eval'>) {
   return (expr: any) =>
     evalExpr(expr, {
       node: ctx.node,
@@ -17,7 +17,7 @@ export function makeEval(ctx: Omit<A2uiRenderContext, 'eval'>) {
     })
 }
 
-function renderNode(node: A2uiViewNode, ctx: A2uiRenderContext, registry: A2uiRegistry): ReactNode {
+function renderNode(node: DeclarativeUiViewNode, ctx: DeclarativeUiRenderContext, registry: DeclarativeUiRegistry): ReactNode {
   const children = (node.children ?? []).map((c, idx) => {
     const out = renderNode(c, ctx, registry)
     return <React.Fragment key={idx}>{out}</React.Fragment>
@@ -27,7 +27,7 @@ function renderNode(node: A2uiViewNode, ctx: A2uiRenderContext, registry: A2uiRe
   if (!factory) {
     return (
       <div className="rounded-md border border-amber-700/40 bg-amber-900/10 px-3 py-2 text-[11px] text-amber-200">
-        Unknown A2UI component: <span className="font-mono">{node.type}</span>
+        Unknown Declarative UI component: <span className="font-mono">{node.type}</span>
       </div>
     )
   }
@@ -35,7 +35,11 @@ function renderNode(node: A2uiViewNode, ctx: A2uiRenderContext, registry: A2uiRe
   return factory({ node, ctx, children })
 }
 
-export function renderA2uiView(args: { root: A2uiViewNode; ctx: A2uiRenderContext; registry: A2uiRegistry }): ReactNode {
+export function renderDeclarativeUiView(args: {
+  root: DeclarativeUiViewNode
+  ctx: DeclarativeUiRenderContext
+  registry: DeclarativeUiRegistry
+}): ReactNode {
   return renderNode(args.root, args.ctx, args.registry)
 }
 
