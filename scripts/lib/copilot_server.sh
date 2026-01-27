@@ -27,7 +27,18 @@ saw_start_managed_copilot_cli_server() {
   # Start Copilot CLI server as an external managed process.
   # This avoids the Copilot Python SDK spawning a server per uvicorn reload,
   # which can leave orphan servers behind and cause port conflicts.
-  COPILOT_SERVER_BIN="${COPILOT_CLI_PATH:-copilot}"
+  #
+  # NOTE: COPILOT_CLI_PATH may point at a repo script (e.g. scripts/sub/copilot_cli_wrapper.sh).
+  # Git can lose executable bits depending on how files are created/checked out.
+  # To be robust, if the path isn't executable we run it via bash.
+  local copilot_server_cmd=("copilot")
+  if [[ -n "${COPILOT_CLI_PATH:-}" ]]; then
+    if [[ -x "${COPILOT_CLI_PATH}" ]]; then
+      copilot_server_cmd=("${COPILOT_CLI_PATH}")
+    else
+      copilot_server_cmd=("bash" "${COPILOT_CLI_PATH}")
+    fi
+  fi
 
   local copilot_server_node_options="${NODE_OPTIONS:-}"
   if [[ "${SAW_COPILOT_USE_SYSTEM_CA:-1}" != "0" && "${SAW_COPILOT_USE_SYSTEM_CA:-1}" != "false" && "${SAW_COPILOT_USE_SYSTEM_CA:-1}" != "False" ]]; then
@@ -45,7 +56,7 @@ saw_start_managed_copilot_cli_server() {
     if [[ -n "${SAW_COPILOT_EXTRA_CA_CERTS:-}" ]]; then
       export NODE_EXTRA_CA_CERTS="$SAW_COPILOT_EXTRA_CA_CERTS"
     fi
-    exec "$COPILOT_SERVER_BIN" --server --port "$SAW_COPILOT_SERVER_PORT"
+    exec "${copilot_server_cmd[@]}" --server --port "$SAW_COPILOT_SERVER_PORT"
   ) &
   COPILOT_SERVER_PID=$!
   export COPILOT_SERVER_PID
