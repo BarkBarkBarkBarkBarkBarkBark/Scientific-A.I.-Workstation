@@ -1,0 +1,40 @@
+id: saw.util.average-csv-integers
+name: Average (CSV Integers)
+version: 0.1.0
+description: Compute the average of a comma-separated list of integers.
+category_path: math/statistics
+entrypoint:
+  file: wrapper.py
+  callable: main
+environment:
+  python: '>=3.11,<3.13'
+  pip: []
+inputs: {}
+params:
+  csv_integers:
+    type: string
+    default: 1, 2, 3
+    ui:
+      label: Comma-separated integers
+  on_invalid:
+    type: string
+    default: error
+    ui:
+      label: Invalid token handling (error|ignore)
+outputs:
+  average:
+    type: number
+  count:
+    type: number
+  sum:
+    type: number
+execution:
+  deterministic: true
+  cacheable: true
+side_effects:
+  network: none
+  disk: read_only
+  subprocess: forbidden
+resources:
+  gpu: forbidden
+  threads: 1

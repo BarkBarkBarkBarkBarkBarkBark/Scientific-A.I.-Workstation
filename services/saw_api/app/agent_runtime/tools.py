@@ -162,19 +162,35 @@ def tool_create_plugin(*, manifest: dict[str, Any], wrapper_code: str, readme: s
     out1 = tool_safe_write(os.path.join(plugin_dir, "plugin.yaml"), plugin_yaml)
     out2 = tool_safe_write(os.path.join(plugin_dir, "wrapper.py"), str(wrapper_code or ""))
     out3 = tool_safe_write(os.path.join(plugin_dir, "README.md"), str(readme or ""))
+    out_ui: dict[str, Any] | None = None
 
-    # Default to the Declarative UI workflow for newly created plugins when requested by the manifest.
+    # Default to the Declarative UI workflow for newly created plugins.
     # This is intentionally minimal: it includes host-builtins for inputs/params/run.
     ui_spec = (manifest or {}).get("ui") if isinstance(manifest, dict) else None
-    schema_file = ""
+    ui_mode = ""
+    schema_file = "ui/declarative_ui.yaml"
     try:
-        if isinstance(ui_spec, dict) and str(ui_spec.get("mode") or "") == "schema":
-            schema_file = str(ui_spec.get("schema_file") or "")
+        if isinstance(ui_spec, dict):
+            ui_mode = str(ui_spec.get("mode") or "").strip()
+            raw_schema_file = str(ui_spec.get("schema_file") or "").strip()
+            if raw_schema_file:
+                schema_file = raw_schema_file
+        elif ui_spec is None:
+            # If the caller omitted ui entirely, still scaffold the default Declarative UI schema.
+            ui_mode = "schema"
     except Exception:
-        schema_file = ""
+        ui_mode = ""
 
-    if schema_file in {"ui/declarative_ui.yaml", "ui/declarative_ui.yaml"}:
-        tool_safe_write(
+    schema_file = str(schema_file or "").strip()
+    safe_schema_path = bool(
+        schema_file
+        and schema_file.startswith("ui/")
+        and ".." not in schema_file.split("/")
+        and schema_file in {"ui/declarative_ui.yaml", "ui/declarative_ui.yml"}
+    )
+
+    if ui_mode == "schema" and safe_schema_path:
+        out_ui = tool_safe_write(
             os.path.join(plugin_dir, schema_file),
             (
                 "declarative_ui_spec_version: '0.1'\n"
@@ -208,8 +224,9 @@ def tool_create_plugin(*, manifest: dict[str, Any], wrapper_code: str, readme: s
             "manifest": os.path.join(plugin_dir, "plugin.yaml"),
             "wrapper": os.path.join(plugin_dir, "wrapper.py"),
             "readme": os.path.join(plugin_dir, "README.md"),
+            "ui_schema": os.path.join(plugin_dir, schema_file) if (ui_mode == "schema" and safe_schema_path) else "",
         },
-        "results": {"plugin.yaml": out1, "wrapper.py": out2, "README.md": out3},
+        "results": {"plugin.yaml": out1, "wrapper.py": out2, "README.md": out3, "ui_schema": out_ui},
     }
 
 

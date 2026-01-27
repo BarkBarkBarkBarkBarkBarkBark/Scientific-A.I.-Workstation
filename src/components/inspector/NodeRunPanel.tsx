@@ -1,4 +1,5 @@
 import { useSawStore } from '../../store/useSawStore'
+import { JsonTable } from '../ui/JsonTable'
 
 export function NodeRunPanel(props: { nodeId: string }) {
   const node = useSawStore((s) => s.nodes.find((n) => n.id === props.nodeId) ?? null)
@@ -54,9 +55,7 @@ export function NodeRunPanel(props: { nodeId: string }) {
             <span className={lastRun.ok ? 'text-emerald-300' : 'text-red-300'}>{lastRun.ok ? 'ok' : 'error'}</span>
           </div>
           {lastRun.error ? <div className="text-[11px] text-red-300">{String(lastRun.error)}</div> : null}
-          <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">
-            {JSON.stringify(lastRun.outputs ?? {}, null, 2)}
-          </pre>
+          <JsonTable value={lastRun.outputs ?? {}} />
           {lastRun.rawStdout || lastRun.rawStderr ? (
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-zinc-400">Raw Python output</div>

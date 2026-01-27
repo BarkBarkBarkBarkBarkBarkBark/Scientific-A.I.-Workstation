@@ -7,13 +7,24 @@ import {
   type AgentSseEvent,
 } from '../../ai/client'
 
-const LS_PROVIDER_KEY = 'saw.agentProvider'
+// Versioned to avoid inheriting older persisted defaults (e.g. an old 'openai' selection).
+const LS_PROVIDER_KEY = 'saw.agentProvider.v2'
+const LS_PROVIDER_KEY_LEGACY = 'saw.agentProvider'
 
 function loadProvider(): AgentProvider {
   try {
-    const v = (typeof window === 'undefined' ? null : window.localStorage.getItem(LS_PROVIDER_KEY)) || ''
-    const s = v.trim().toLowerCase()
-    if (s === 'openai' || s === 'copilot') return s
+    if (typeof window === 'undefined') return 'copilot'
+
+    // Prefer the new key.
+    const v2 = window.localStorage.getItem(LS_PROVIDER_KEY) || ''
+    const s2 = v2.trim().toLowerCase()
+    if (s2 === 'openai' || s2 === 'copilot') return s2
+
+    // Legacy fallback: only honor an explicit Copilot selection.
+    // If legacy is 'openai', we intentionally reset to Copilot as the default.
+    const v1 = window.localStorage.getItem(LS_PROVIDER_KEY_LEGACY) || ''
+    const s1 = v1.trim().toLowerCase()
+    if (s1 === 'copilot') return 'copilot'
   } catch {
     // ignore
   }

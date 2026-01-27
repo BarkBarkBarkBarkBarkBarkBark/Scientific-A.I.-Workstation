@@ -1,0 +1,249 @@
+saw_machine_spec:
+  spec_version: "0.3"
+  name: "Stabilize SAW before LLM code-culling"
+  intent:
+    - "Lock down a clean, production-friendly separation between: (a) tracked repo code/docs, (b) user workspace plugins+data."
+    - "Canonicalize tool IDs + deprecate aliases to prevent tool-surface bloat."
+    - "Make schema drift detectable and enforceable (backend ↔ frontend ↔ docs)."
+    - "Harden terminal/tool permissions for safe initial release."
+  explicit_non_goals:
+    - "No LLM-based codebase pruning in this phase."
+    - "No major plugin API redesign beyond path/config changes."
+
+  current_problem_summary:
+    - "saw-workspace currently contains both runtime/user content (plugins, runs, outputs) AND repo-tracked specs/docs/schemas."
+    - "Frontend validator imports schema from saw-workspace, which is risky for packaged/prod builds."
+    - "Tool surface shows duplicates/aliases and inconsistent naming (functions.* vs functions.dev.* etc.)."
+    - "Attestation works, but drift control + release gating need hardening."
+
+  target_state_overview:
+    repo_tracked:
+      - "All stable docs/specs/schemas live OUTSIDE saw-workspace in a dedicated, tracked location."
+      - "Frontend ships a bundled validator schema (or fetches schema from backend) that works in prod."
+      - "Tool catalog is canonical, versioned, and validated; aliases are explicitly deprecated."
+      - "CI enforces contract tests (schemas, tool catalog, attestation packet)."
+    workspace_runtime:
+      - "saw-workspace remains for plugins and plugin-generated data, but generated artifacts are mostly git-ignored."
+      - "Workspace path is configurable (so users can keep it in-repo or outside)."
+
+  directory_conventions:
+    keep_in_saw_workspace:
+      rationale: "User workspace content and outputs; can be project-specific and large."
+      tracked_paths:
+        - "saw-workspace/plugins/**"       # plugin source (wrapper.py, plugin.yaml) stays here
+        - "saw-workspace/README.md"        # short explanation of workspace semantics
+      ignored_paths_recommended:
+        - "saw-workspace/.saw/**"          # runs, logs, caches, runtime artifacts
+        - "saw-workspace/introspection_docs/**"
+        - "saw-workspace/plugins/**/output/**"
+        - "saw-workspace/plugins/**/runs/**"
+        - "saw-workspace/plugins/**/__pycache__/**"
+        - "saw-workspace/**/.DS_Store"
+    move_out_of_saw_workspace:
+      rationale: "Deterministic, version-controlled product/repo context used by agents + build tooling."
+      new_root: "saw-context/"
+      tracked_paths:
+        - "saw-context/START_HERE.md"
+        - "saw-context/introspection/IntrospectionPacket_v1_1.schema.json"
+        - "saw-context/tools/tools.catalog.schema.v1.json"
+        - "saw-context/security/CAPS_RULES.md"
+        - "saw-context/attestation/default_probes.v1.json"
+        - "saw-context/api/api_endpoints.json"      # if you keep snapshots
+        - "saw-context/api/openapi-notes.md"        # optional
+        - "saw-context/logging/LOGGING.md"
+        - "saw-context/machine-specs/**"
+      deprecate_old_location:
+        old_root: "saw-workspace/machine-context/"
+        policy:
+          - "Keep a minimal stub file at saw-workspace/machine-context/START_HERE.md that points to saw-context/START_HERE.md."
+          - "Do not import schemas from saw-workspace in the frontend after migration."
+          - "Provide backward compatible resolver that checks saw-context first, then old location."
+
+  configuration_and_path_resolution:
+    new_config_file:
+      path: ".saw/config.json"
+      schema:
+        workspace_root: "saw-workspace"         # default
+        context_root: "saw-context"             # new default
+        mode: "dev|release"
+        dev_tools_enabled: true
+    env_overrides:
+      - "SAW_WORKSPACE_ROOT"
+      - "SAW_CONTEXT_ROOT"
+      - "SAW_MODE=release disables dev.term and other dangerous tools unless explicitly enabled"
+    resolver_rules:
+      - "context_root resolution order: env SAW_CONTEXT_ROOT -> .saw/config.json -> default 'saw-context'"
+      - "workspace_root resolution order: env SAW_WORKSPACE_ROOT -> .saw/config.json -> default 'saw-workspace'"
+      - "never require saw-workspace to exist at build-time for frontend to compile"
+
+  workstreams:
+    W1_context_migration:
+      goal: "Move deterministic agent context/schemas out of saw-workspace and update references safely."
+      tasks:
+        - id: "W1_T1_create_saw_context_root"
+          actions:
+            - "Create saw-context/ with the files listed in move_out_of_saw_workspace.tracked_paths."
+            - "Copy content from saw-workspace/machine-context/* into saw-context/* and preserve sha256 where applicable."
+        - id: "W1_T2_backward_compat_stub"
+          actions:
+            - "Replace saw-workspace/machine-context/START_HERE.md with a short pointer to ../../saw-context/START_HERE.md."
+            - "Optionally keep saw-workspace/machine-context/README.md explaining deprecation."
+        - id: "W1_T3_update_backend_context_reads"
+          actions:
+            - "Patch Engine and SAW API should read schemas/docs from context_root, not saw-workspace."
+            - "Update introspection_run to read schema/docs via resolver."
+        - id: "W1_T4_update_frontend_schema_import"
+          decision: "bundle_schema"
+          options:
+            bundle_schema:
+              actions:
+                - "Move schema import to a build-stable path under src/ (e.g., src/schemas/IntrospectionPacket_v1_1.schema.json)."
+                - "Add a build step to sync/copy from saw-context/introspection/*.json into src/schemas/ (or generate TS module)."
+            fetch_schema:
+              actions:
+                - "Expose GET /api/dev/schema/introspection?v=1.1 returning schema JSON."
+                - "Validator loads schema at runtime; cache it; fails gracefully if unavailable in release."
+          recommended: "bundle_schema"
+    W2_tool_catalog_canonicalization:
+      goal: "Stop tool ID drift and duplication; keep a clean public surface."
+      tasks:
+        - id: "W2_T1_define_canonical_tool_ids"
+          canonical_ids:
+            - "dev.tree"
+            - "dev.file.read"
+            - "dev.git.info"
+            - "dev.git.status"
+            - "dev.tools.list"
+            - "dev.introspection.run"
+            - "saw.agent.health"
+            - "dev.safe.write"
+            - "dev.safe.applyPatch"
+            - "dev.safe.delete"
+            - "dev.term"         # gated (see W4)
+        - id: "W2_T2_alias_and_deprecate"
+          rules:
+            - "Support old tool IDs as aliases for one release cycle."
+            - "Every alias entry must declare: deprecated=true, replacement_tool_id, remove_by_version."
+            - "tools.list response must include both canonical and aliases but mark aliases deprecated."
+          examples:
+            - alias_tool_id: "functions.git_info"
+              replacement_tool_id: "dev.git.info"
+            - alias_tool_id: "functions.introspection_run"
+              replacement_tool_id: "dev.introspection.run"
+            - alias_tool_id: "functions.dev.tools.list"
+              replacement_tool_id: "dev.tools.list"
+        - id: "W2_T3_single_registry_source_of_truth"
+          actions:
+            - "Implement/confirm a single registry module that defines tools metadata."
+            - "Ensure /api/dev/tools/list is generated from this registry (no hard-coded lists)."
+            - "Add a schema for tools.list output and validate it in CI."
+    W3_schema_drift_management:
+      goal: "Detect schema drift early and prevent it from shipping."
+      tasks:
+        - id: "W3_T1_schema_hashes"
+          actions:
+            - "Compute sha256 for each shipped schema and include it in:"
+            - "IntrospectionPacket: top-level fields schema_sha256_map (or introspection_schema_sha256)."
+            - "tools.list response: tools_catalog_schema_version and schema_sha256."
+        - id: "W3_T2_generated_types"
+          actions:
+            - "Generate TypeScript types from JSON Schema (or maintain hand-authored types) and enforce compatibility."
+            - "Generate Python models (pydantic) aligned to the schema."
+            - "Add a lightweight build/CI check that types reflect schema version."
+        - id: "W3_T3_golden_fixtures"
+          actions:
+            - "Add a golden IntrospectionPacket fixture JSON/YAML under tests/fixtures/ that must validate against schema."
+            - "Add a golden tools.list fixture that must validate against tools catalog schema."
+        - id: "W3_T4_ci_contract_checks"
+          actions:
+            - "CI step: validate schema JSON files are valid JSON Schema."
+            - "CI step: validate golden fixtures against schemas (frontend + backend if possible)."
+            - "CI step: fail if evidence.kind enum differs between schema and produced packet."
+    W4_release_safety_gates:
+      goal: "Prevent dangerous capabilities from leaking into release builds."
+      tasks:
+        - id: "W4_T1_mode_switch"
+          actions:
+            - "Implement SAW_MODE=release behavior:"
+            - "dev.term disabled by default."
+            - "dev.safe.* still approval-gated; optionally disable delete in release unless explicitly enabled."
+            - "tools.list marks disabled tools availability='unavailable' with reason."
+        - id: "W4_T2_terminal_gating"
+          actions:
+            - "Backend: terminal tool requires approval + caps allowlist + explicit enable flag."
+            - "Frontend: terminal UI hidden unless dev_tools_enabled AND user has toggled 'Enable Terminal Tools' for session."
+        - id: "W4_T3_attestation_prominence"
+          actions:
+            - "Run Attestation remains available in release (read-only) but must not expose write tools unless enabled."
+    W5_git_hygiene_and_noise_control:
+      goal: "Keep attestation useful by keeping repo mostly clean."
+      tasks:
+        - id: "W5_T1_gitignore_workspace_outputs"
+          actions:
+            - "Ensure .gitignore ignores saw-workspace/.saw/** and introspection_docs/** and plugin outputs."
+        - id: "W5_T2_track_only_intentional_docs"
+          actions:
+            - "Track saw-context/** and machine-specs intentionally."
+            - "Optionally enforce pre-commit check: block committing large runtime artifacts under saw-workspace/."
+
+  implementation_notes_for_agent:
+    sequencing_recommendation:
+      - "Do W1 (context migration) first because it affects imports and packaging."
+      - "Do W2 next (canonical tool registry) to stop ongoing drift."
+      - "Do W3 (schema drift enforcement) once the file locations are stable."
+      - "Do W4 (release gates) before any public demo."
+      - "Do W5 (git hygiene) alongside the above."
+    constraints:
+      - "Minimize breaking changes: keep aliases for one cycle."
+      - "Prefer small commits per workstream."
+      - "Update docs in saw-context/START_HERE.md whenever behavior changes."
+
+  acceptance_tests:
+    A1_context_paths:
+      - "Backend resolves context_root to saw-context by default."
+      - "Frontend builds without requiring saw-workspace to exist."
+      - "saw-workspace/machine-context/START_HERE.md stub points to saw-context entrypoint."
+    A2_tools_surface:
+      - "dev.tools.list returns canonical IDs; aliases marked deprecated with replacement and removal version."
+      - "No duplicate tool IDs with different semantics."
+    A3_attestation:
+      - "dev.introspection.run produces packet schema_version=1.1 and includes schema hashes."
+      - "UI 'Run Attestation' works and validates using bundled schema."
+    A4_release_mode:
+      - "SAW_MODE=release disables dev.term and any other configured dev-only tools."
+      - "tools.list reflects disabled tools as unavailable with reason."
+    A5_ci_contract:
+      - "Golden fixtures validate against schemas."
+      - "CI fails on evidence.kind enum drift or schema mismatch."
+
+  deliverables_checklist:
+    repo_structure_after:
+      - "saw-context/** (tracked)"
+      - "saw-workspace/plugins/** (tracked)"
+      - "saw-workspace/.saw/** (ignored)"
+      - "src/schemas/** (tracked or generated during build)"
+      - ".saw/config.json (tracked template or generated; ensure safe defaults)"
+    docs_to_migrate_out_of_saw_workspace:
+      move_list:
+        - from: "saw-workspace/machine-context/START_HERE.md"
+          to: "saw-context/START_HERE.md"
+          keep_stub: true
+        - from: "saw-workspace/machine-context/introspection/*"
+          to: "saw-context/introspection/*"
+        - from: "saw-workspace/machine-context/tools/*"
+          to: "saw-context/tools/*"
+        - from: "saw-workspace/machine-context/security/*"
+          to: "saw-context/security/*"
+        - from: "saw-workspace/machine-context/attestation/*"
+          to: "saw-context/attestation/*"
+        - from: "saw-workspace/machine-context/LOGGING.md"
+          to: "saw-context/logging/LOGGING.md"
+        - from: "saw-workspace/machine-specs/*"
+          to: "saw-context/machine-specs/*"
+      keep_in_workspace:
+        - "saw-workspace/plugins/**"
+        - "saw-workspace/plugins/**/plugin.yaml"
+        - "saw-workspace/plugins/**/wrapper.py"
+        - "saw-workspace/plugins/**/requirements*"
+        - "saw-workspace/plugins/**/README.md"
+        - "saw-workspace/plugins/**/assets/**"
