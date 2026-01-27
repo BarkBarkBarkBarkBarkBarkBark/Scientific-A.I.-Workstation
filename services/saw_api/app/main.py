@@ -1139,29 +1139,41 @@ def plugins_create_from_python(req: PluginCreateFromPythonRequest) -> PluginCrea
         "resources": {"gpu": "forbidden", "threads": int(req.threads or 1)},
         "ui": {
             "mode": "schema",
-            "schema_file": "ui.yaml",
+            "schema_file": "ui/a2ui.yaml",
             "bundle_file": "ui/ui.bundle.js",
             "sandbox": True,
         },
     }
 
     ui_schema = (
-        "version: 1\n"
-        "sections:\n"
-        "  - type: builtin\n"
-        "    component: node_inputs\n"
-        "  - type: builtin\n"
-        "    component: node_parameters\n"
-        "  - type: builtin\n"
-        "    component: run_panel\n"
-        "  - type: builtin\n"
-        "    component: plugin_description\n"
+        "a2ui_spec_version: '0.1'\n"
+        "context:\n"
+        "  defaults:\n"
+        "    uiState: {}\n"
+        "computed: {}\n"
+        "queries: {}\n"
+        "actions: {}\n"
+        "lifecycle: {}\n"
+        "view:\n"
+        "  type: Stack\n"
+        "  props: { gap: md }\n"
+        "  children:\n"
+        "    - type: Panel\n"
+        "      props: { title: 'Plugin', variant: default }\n"
+        "      children:\n"
+        "        - type: Text\n"
+        "          props: { variant: muted }\n"
+        "          text: 'Edit ui/a2ui.yaml to customize this UI.'\n"
+        "    - type: NodeInputs\n"
+        "    - type: NodeParameters\n"
+        "    - type: NodeRunPanel\n"
     )
 
     try:
         os.makedirs(plugin_dir, exist_ok=False)
+        os.makedirs(os.path.join(plugin_dir, "ui"), exist_ok=True)
         _write_text(os.path.join(plugin_dir, "wrapper.py"), wrapper)
-        _write_text(os.path.join(plugin_dir, "ui.yaml"), ui_schema)
+        _write_text(os.path.join(plugin_dir, "ui", "a2ui.yaml"), ui_schema)
         with open(os.path.join(plugin_dir, "plugin.yaml"), "w", encoding="utf-8") as f:
             yaml.safe_dump(manifest, f, sort_keys=False)
     except FileExistsError:

@@ -1,0 +1,41 @@
+id: saw.generated.magic-eight-ball
+name: Magic Eight Ball
+version: 0.1.0
+description: Ask a question and get one of 8 classic Magic Eight Ball-style canned
+  answers (optionally seeded for reproducibility).
+category_path: games
+entrypoint:
+  file: wrapper.py
+  callable: main
+environment:
+  python: '>=3.11,<3.13'
+  pip: []
+inputs: {}
+params:
+  question:
+    type: string
+    default: ''
+    ui:
+      label: Your question
+    description: The question you want the Magic Eight Ball to answer.
+  seed:
+    type: string
+    default: ''
+    ui:
+      label: Seed (optional)
+    description: If provided, the same question+seed will always return the same answer.
+outputs:
+  answer:
+    type: string
+  details:
+    type: object
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: none
+  disk: read_only
+  subprocess: forbidden
+resources:
+  gpu: forbidden
+  threads: 1

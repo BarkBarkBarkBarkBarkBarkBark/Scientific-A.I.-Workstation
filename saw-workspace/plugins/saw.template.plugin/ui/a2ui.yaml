@@ -1,0 +1,21 @@
+a2ui_spec_version: '0.1'
+context:
+  defaults:
+    uiState: {}
+computed: {}
+queries: {}
+actions: {}
+lifecycle: {}
+view:
+  type: Stack
+  props: { gap: md }
+  children:
+    - type: Panel
+      props: { title: 'Template Plugin', variant: default }
+      children:
+        - type: Text
+          props: { variant: muted }
+          text: 'Edit ui/a2ui.yaml to customize this UI.'
+    - type: NodeInputs
+    - type: NodeParameters
+    - type: NodeRunPanel

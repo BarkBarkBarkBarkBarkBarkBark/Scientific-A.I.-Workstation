@@ -45,7 +45,7 @@ resources:
 
 ui:
   mode: "schema"
-  schema_file: "ui.yaml"
+  schema_file: "ui/a2ui.yaml"
   bundle_file: "ui/ui.bundle.js"
   sandbox: true
 

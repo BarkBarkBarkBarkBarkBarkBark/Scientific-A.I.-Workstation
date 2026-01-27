@@ -163,6 +163,44 @@ def tool_create_plugin(*, manifest: dict[str, Any], wrapper_code: str, readme: s
     out2 = tool_safe_write(os.path.join(plugin_dir, "wrapper.py"), str(wrapper_code or ""))
     out3 = tool_safe_write(os.path.join(plugin_dir, "README.md"), str(readme or ""))
 
+    # Default to the A2UI workflow for newly created plugins when requested by the manifest.
+    # This is intentionally minimal: it includes host-builtins for inputs/params/run.
+    ui_spec = (manifest or {}).get("ui") if isinstance(manifest, dict) else None
+    schema_file = ""
+    try:
+        if isinstance(ui_spec, dict) and str(ui_spec.get("mode") or "") == "schema":
+            schema_file = str(ui_spec.get("schema_file") or "")
+    except Exception:
+        schema_file = ""
+
+    if schema_file in {"ui/a2ui.yaml", "ui/a2ui.yml"}:
+        tool_safe_write(
+            os.path.join(plugin_dir, schema_file),
+            (
+                "a2ui_spec_version: '0.1'\n"
+                "context:\n"
+                "  defaults:\n"
+                "    uiState: {}\n"
+                "computed: {}\n"
+                "queries: {}\n"
+                "actions: {}\n"
+                "lifecycle: {}\n"
+                "view:\n"
+                "  type: Stack\n"
+                "  props: { gap: md }\n"
+                "  children:\n"
+                "    - type: Panel\n"
+                "      props: { title: 'Plugin', variant: default }\n"
+                "      children:\n"
+                "        - type: Text\n"
+                "          props: { variant: muted }\n"
+                "          text: 'Edit ui/a2ui.yaml to customize this UI.'\n"
+                "    - type: NodeInputs\n"
+                "    - type: NodeParameters\n"
+                "    - type: NodeRunPanel\n"
+            ),
+        )
+
     return {
         "ok": True,
         "plugin_id": plugin_id,
