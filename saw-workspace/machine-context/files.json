@@ -7,6 +7,8 @@
     { "p": "src/ai/client.ts", "r": "frontend client for /api/ai/status /api/ai/plan /api/ai/chat" },
     { "p": "vite.config.ts", "r": "Vite dev-server middleware: OpenAI proxy endpoints under /api/ai/*" },
     { "p": "src/components/PluginBrowser.tsx", "r": "left sidebar; collapsible; grouped by categoryPath; drag source" },
+    { "p": "src/components/LeftSidebar.tsx", "r": "left sidebar switcher; toggles between Plugins and Files panels" },
+    { "p": "src/components/FileBrowser.tsx", "r": "left sidebar Files panel; reads repo tree via /api/dev/tree and previews file via /api/dev/file" },
     { "p": "src/components/PipelineBuilder.tsx", "r": "pipeline mode UI: drop zones; reorder; remove; module tabs; per-module resizable view; fullscreen button" },
     { "p": "src/components/NodeCanvas.tsx", "r": "graph mode UI (ReactFlow); drag plugins onto canvas; connect types" },
     { "p": "src/components/Inspector.tsx", "r": "right sidebar inspector; params + node details; fullscreen button" },

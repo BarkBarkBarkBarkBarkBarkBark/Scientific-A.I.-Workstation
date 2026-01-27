@@ -4,9 +4,11 @@ export function createLayoutSlice(set: any, get: any): Pick<
   SawState,
   | 'bottomTab'
   | 'layoutMode'
+  | 'leftSidebarTab'
   | 'layout'
   | 'consoleFullscreen'
   | 'setBottomTab'
+  | 'setLeftSidebarTab'
   | 'setLayoutMode'
   | 'setLayout'
   | 'toggleLeftSidebar'
@@ -17,6 +19,7 @@ export function createLayoutSlice(set: any, get: any): Pick<
   return {
     bottomTab: 'logs',
     layoutMode: 'pipeline',
+    leftSidebarTab: 'plugins',
     layout: {
       leftWidth: 280,
       leftWidthOpen: 280,
@@ -37,6 +40,7 @@ export function createLayoutSlice(set: any, get: any): Pick<
     consoleFullscreen: false,
 
     setBottomTab: (bottomTab) => set({ bottomTab }),
+    setLeftSidebarTab: (leftSidebarTab) => set({ leftSidebarTab }),
     setLayoutMode: (layoutMode) => set({ layoutMode }),
     setLayout: (patch) => set((s: SawState) => ({ layout: { ...s.layout, ...patch } })),
 

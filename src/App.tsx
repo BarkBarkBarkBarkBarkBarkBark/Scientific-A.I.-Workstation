@@ -1,5 +1,5 @@
 import { TopBar } from './components/TopBar'
-import { PluginBrowser } from './components/PluginBrowser'
+import { LeftSidebar } from './components/LeftSidebar'
 import { NodeCanvas } from './components/NodeCanvas'
 import { Inspector } from './components/Inspector'
 import { BottomPanel } from './components/BottomPanel'
@@ -97,7 +97,7 @@ export function App() {
                   gridTemplateColumns: `${layout.leftWidth}px 12px 1fr 12px ${layout.rightWidth}px`,
                 }}
               >
-                <PluginBrowser />
+                <LeftSidebar />
 
                 <div className="h-full">
                   <ResizableDivider

@@ -19,6 +19,7 @@ export function installLocalStoragePersist<TState extends any>(store: StoreApi<T
           errors: j.errors ?? cur.errors,
           errorLog: j.errorLog ?? cur.errorLog,
           bottomTab: j.bottomTab ?? cur.bottomTab,
+          leftSidebarTab: j.leftSidebarTab ?? cur.leftSidebarTab,
         } as any,
         false,
       )
@@ -34,6 +35,7 @@ export function installLocalStoragePersist<TState extends any>(store: StoreApi<T
           errors: (s.errors ?? []).slice(-120),
           errorLog: (s.errorLog ?? []).slice(-200),
           bottomTab: s.bottomTab,
+          leftSidebarTab: s.leftSidebarTab,
         }),
       )
     })

@@ -6,6 +6,7 @@ import type { PatchProposal } from '../types/patch'
 
 export type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo' | 'terminal'
 export type LayoutMode = 'pipeline' | 'graph'
+export type LeftSidebarTab = 'plugins' | 'files'
 
 export type FullscreenState = {
   open: boolean
@@ -23,6 +24,7 @@ export type SawState = {
   // UI
   bottomTab: BottomTab
   layoutMode: LayoutMode
+  leftSidebarTab: LeftSidebarTab
   layout: {
     leftWidth: number
     leftWidthOpen: number
@@ -81,6 +83,7 @@ export type SawState = {
   setSelectedNodeId: (id: string | null) => void
   setEditableMode: (enabled: boolean) => void
   setBottomTab: (tab: BottomTab) => void
+  setLeftSidebarTab: (tab: LeftSidebarTab) => void
   clearErrors: () => void
   setGoalText: (text: string) => void
   setLayoutMode: (mode: LayoutMode) => void

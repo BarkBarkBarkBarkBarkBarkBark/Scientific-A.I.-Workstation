@@ -8,6 +8,7 @@ export function PluginBrowser() {
   const [viewMode, setViewMode] = useState<'flat' | 'tree'>('flat')
   const [builderOpen, setBuilderOpen] = useState(false)
   const layout = useSawStore((s) => s.layout)
+  const setLeftSidebarTab = useSawStore((s) => s.setLeftSidebarTab)
   const toggleLeftSidebar = useSawStore((s) => s.toggleLeftSidebar)
   const catalog = useSawStore((s) => s.pluginCatalog)
   const workspacePlugins = useSawStore((s) => s.workspacePlugins)
@@ -163,6 +164,14 @@ export function PluginBrowser() {
         title="Plugin Browser"
         right={
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setLeftSidebarTab('files')}
+              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900"
+              title="Switch to Files"
+            >
+              Files
+            </button>
             <div className="text-[11px] text-zinc-500">
               ws:{' '}
               <span className="font-mono text-zinc-300">
