@@ -8,7 +8,7 @@ It prints:
 - parsed SAW events (JSON)
 
 Usage:
-  python3 scripts/test_saw_copilot_sse.py "hello" \
+  python3 scripts/sub/test_saw_copilot_sse.py "hello" \
     --api http://127.0.0.1:5127 \
     --provider copilot
 
@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import urllib.error
 import urllib.request
 

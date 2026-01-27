@@ -23,7 +23,8 @@ Scientific AI Workstation
         dev_all_linux.sh
         dev_all_mac.sh
         dev_all_windows.ps1
-        linux_init.sh
+        sub
+            linux_init.sh
     services
         db
             extensions.sql

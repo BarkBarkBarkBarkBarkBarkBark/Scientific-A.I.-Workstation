@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Nukes processes listening on common SAW dev ports (macOS).
+# Nukes processes listening on common SAW dev ports.
 # Safe-by-default: only kills LISTEN sockets on explicit ports.
 #
 # Usage:
-#   scripts/nuke_ports_mac.sh                 # uses defaults / env
-#   scripts/nuke_ports_mac.sh 5127 5128 7176  # explicit ports
+#   scripts/sub/nuke_ports.sh                 # uses defaults / env
+#   scripts/sub/nuke_ports.sh 5127 5128 7176  # explicit ports
 #
 # Env (optional):
 #   FRONTEND_PORT=7176
@@ -18,8 +18,12 @@ set -euo pipefail
 log() { echo "[nuke_ports] $*"; }
 warn() { echo "[nuke_ports] WARN: $*" >&2; }
 
-if ! command -v lsof >/dev/null 2>&1; then
-  echo "[nuke_ports] ERROR: lsof not found (required)." >&2
+have_lsof=0
+have_ss=0
+if command -v lsof >/dev/null 2>&1; then have_lsof=1; fi
+if command -v ss >/dev/null 2>&1; then have_ss=1; fi
+if [[ "$have_lsof" -eq 0 && "$have_ss" -eq 0 ]]; then
+  echo "[nuke_ports] ERROR: need either 'lsof' or 'ss' (iproute2) to find port listeners." >&2
   exit 127
 fi
 
@@ -52,8 +56,18 @@ parse_ports() {
 
 pids_for_port() {
   local port="$1"
-  # Only LISTEN sockets; -t prints just PIDs.
-  lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+  if [[ "$have_lsof" -eq 1 ]]; then
+    # Only LISTEN sockets; -t prints just PIDs.
+    lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+    return 0
+  fi
+
+  # ss output example users field: users:(("uvicorn",pid=12345,fd=3))
+  ss -ltnp 2>/dev/null \
+    | awk -v p=":${port}" '$1 == "LISTEN" && $4 ~ p { print $0 }' \
+    | grep -oE 'pid=[0-9]+' \
+    | cut -d= -f2 \
+    | sort -u || true
 }
 
 kill_pids() {

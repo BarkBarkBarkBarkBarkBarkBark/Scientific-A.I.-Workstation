@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 LOG_PREFIX="[linux_init]"
@@ -13,11 +13,12 @@ die() { echo "${LOG_PREFIX} ERROR: $*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/linux_init.sh [--compose-up] [--yes]
+  scripts/sub/linux_init.sh [--compose-up] [--yes]
 
 What it does (headless-safe):
   - Installs Docker Engine (if missing)
   - Installs Docker Compose v2 (docker compose) (if missing)
+  - Ensures common dependencies used by dev scripts are present (e.g. lsof)
   - Enables + starts Docker daemon (if installed but not running)
   - Optionally runs: docker compose up -d (repo root docker-compose.yml)
 
@@ -29,8 +30,8 @@ Env (optional):
   DOCKER_COMPOSE_VERSION=v2.27.0   # used only if package install fails
 
 Examples:
-  scripts/linux_init.sh
-  scripts/linux_init.sh --compose-up
+  scripts/sub/linux_init.sh
+  scripts/sub/linux_init.sh --compose-up
 EOF
 }
 
@@ -162,16 +163,21 @@ ensure_docker_running() {
   warn "Or try: sudo docker info"
 }
 
+ensure_base_tools() {
+  local pm
+  pm="$(detect_pm)"
+  log "Installing base tools ($pm)..."
+  # lsof is used by dev scripts when present; ss (iproute2) is typically already installed.
+  pm_install "$pm" ca-certificates curl git lsof
+}
+
 ensure_docker() {
   if command -v docker >/dev/null 2>&1; then
     log "docker already installed"
     return
   fi
 
-  local pm
-  pm="$(detect_pm)"
-  log "Installing prerequisites ($pm)..."
-  pm_install "$pm" ca-certificates curl git
+  ensure_base_tools
 
   log "Installing Docker Engine via get.docker.com (non-interactive)..."
   curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
@@ -237,6 +243,7 @@ ensure_docker_compose() {
 main() {
   log "root: $ROOT_DIR"
 
+  ensure_base_tools
   ensure_docker
   ensure_docker_running
   ensure_docker_compose

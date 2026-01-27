@@ -5,14 +5,19 @@ set -euo pipefail
 #
 # Default output: saw-workspace/certs/macos-keychain.pem
 # Usage:
-#   bash scripts/export_macos_keychain_certs_pem.sh
-#   bash scripts/export_macos_keychain_certs_pem.sh /tmp/macos-cas.pem
+#   bash scripts/sub/export_macos_keychain_certs_pem.sh
+#   bash scripts/sub/export_macos_keychain_certs_pem.sh /tmp/macos-cas.pem
 #
 # After generating, try:
 #   NODE_EXTRA_CA_CERTS=saw-workspace/certs/macos-keychain.pem copilot -p "Say pong" --allow-all-tools --allow-url github.com --silent
 #
 # Or for SAW API:
 #   export SAW_COPILOT_EXTRA_CA_CERTS="$PWD/saw-workspace/certs/macos-keychain.pem"
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "[export] ERROR: this script is macOS-only (needs the 'security' tool)." >&2
+  exit 2
+fi
 
 out="${1:-saw-workspace/certs/macos-keychain.pem}"
 mkdir -p "$(dirname "$out")"

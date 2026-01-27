@@ -99,6 +99,11 @@ This produces a machine-readable packet describing tool surface + git state + em
 
 Starts: Postgres (pgvector) + SAW API + frontend.
 
+If you're on a fresh Linux machine (or Docker isn't installed yet), bootstrap first:
+```bash
+bash scripts/sub/linux_init.sh --compose-up
+```
+
 **macOS:**
 ```bash
 ./scripts/dev_all_mac.sh --frontend-port 7176 --api-port 5127
@@ -278,16 +283,16 @@ See `ENV_SETUP.md`.
     Another common symptom is an SSE `session.error` like “Failed to list models”.
   - Quick sanity check:
     - `curl -fsS http://127.0.0.1:5127/health | python3 -m json.tool` and confirm `copilot_available: true` and `copilot_ok: true`.
-    - Or run the smoke test: `./.venv/bin/python scripts/test_saw_copilot_sse.py "hello" --provider copilot --api http://127.0.0.1:5127`
+    - Or run the smoke test: `./.venv/bin/python scripts/sub/test_saw_copilot_sse.py "hello" --provider copilot --api http://127.0.0.1:5127`
   - Check Copilot CLI logs:
     ```bash
-    bash scripts/copilot_cli_diag.sh
+    bash scripts/sub/copilot_cli_diag.sh
     ```
   - If you see: `unable to get issuer certificate`, it’s a TLS trust issue (often corporate SSL interception).
     SAW defaults to starting Copilot with `--use-system-ca`, but some environments still need an explicit CA bundle.
   - Generate a PEM bundle from macOS keychains:
     ```bash
-    bash scripts/export_macos_keychain_certs_pem.sh
+    bash scripts/sub/export_macos_keychain_certs_pem.sh
     ```
   - Export it for SAW before starting the services (or let the runner auto-detect it under `saw-workspace/certs/`):
     ```bash

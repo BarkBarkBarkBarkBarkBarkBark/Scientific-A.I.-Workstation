@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Shared helpers
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/ports.sh"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/copilot_server.sh"
+
 LOG_PREFIX="[dev_all_linux]"
 log() { echo "${LOG_PREFIX} $*"; }
 warn() { echo "${LOG_PREFIX} WARN: $*" >&2; }
@@ -125,6 +131,10 @@ cleanup() {
   echo ""
   log "stopping..."
 
+  if [[ -n "${COPILOT_SERVER_PID:-}" ]] && kill -0 "$COPILOT_SERVER_PID" 2>/dev/null; then
+    kill "$COPILOT_SERVER_PID" 2>/dev/null || true
+  fi
+
   if [[ -n "${VITE_PID:-}" ]] && kill -0 "$VITE_PID" 2>/dev/null; then
     kill "$VITE_PID" 2>/dev/null || true
   fi
@@ -140,6 +150,14 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 log "root: $ROOT_DIR"
+
+saw_require_port_tooling
+
+NUKE_PORTS_SCRIPT="$ROOT_DIR/scripts/sub/nuke_ports.sh"
+
+ensure_port_free() {
+  saw_ensure_port_free "$1" "$2" "$NUKE_PORTS_SCRIPT"
+}
 
 if ! command -v uv >/dev/null 2>&1; then
   die "uv not found on PATH. Install uv (Linux/macOS): curl -LsSf https://astral.sh/uv/install.sh | sh"
@@ -188,6 +206,31 @@ uv pip install -r services/saw_api/requirements.txt >/dev/null
 log "installing Patch Engine deps..."
 uv pip install -r services/patch_engine/requirements.txt >/dev/null
 
+# Copilot TLS scoping
+# -------------------
+# On Linux, rely on system CA by default (requires `ca-certificates` installed).
+export SAW_COPILOT_USE_SYSTEM_CA="${SAW_COPILOT_USE_SYSTEM_CA:-1}"
+
+# Model defaults
+export SAW_AGENT_MODEL="${SAW_AGENT_MODEL:-gpt-5.2}"
+export SAW_COPILOT_MODEL="${SAW_COPILOT_MODEL:-gpt-5.2}"
+export SAW_COPILOT_LOG_LEVEL="${SAW_COPILOT_LOG_LEVEL:-info}"
+
+# If COPILOT_CLI_PATH isn't set, use our wrapper when present.
+if [[ -z "${COPILOT_CLI_PATH:-}" ]] && [[ -f "$ROOT_DIR/scripts/sub/copilot_cli_wrapper.sh" ]]; then
+  export COPILOT_CLI_PATH="$ROOT_DIR/scripts/sub/copilot_cli_wrapper.sh"
+fi
+
+# Start managed Copilot CLI server only if Copilot is available.
+# (Avoid breaking Linux users who don't have Copilot installed.)
+if [[ -z "${SAW_COPILOT_CLI_URL:-}" ]]; then
+  if command -v copilot >/dev/null 2>&1 || [[ -n "${COPILOT_CLI_PATH:-}" ]]; then
+    saw_start_managed_copilot_cli_server "$NUKE_PORTS_SCRIPT" || warn "Copilot server did not start; continuing without managed Copilot transport"
+  else
+    warn "copilot not found; skipping managed Copilot server"
+  fi
+fi
+
 export SAW_ENABLE_DB
 export SAW_ENABLE_PLUGINS
 export SAW_API_URL="$API_URL"
@@ -201,6 +244,7 @@ if [[ "$RELOAD_MODE" -eq 1 ]]; then
 fi
 
 log "starting SAW API on ${API_HOST}:${API_PORT} ..."
+ensure_port_free "$API_PORT" "SAW API"
 "$VENV_PY" -m uvicorn services.saw_api.app.main:app \
   --host "$API_HOST" --port "$API_PORT" \
   "${UVICORN_RELOAD_ARGS[@]}" --reload-dir "services/saw_api" &
@@ -216,6 +260,7 @@ for _ in $(seq 1 60); do
 done
 
 log "starting Patch Engine on ${PATCH_ENGINE_HOST}:${PATCH_ENGINE_PORT} ..."
+ensure_port_free "$PATCH_ENGINE_PORT" "Patch Engine"
 "$VENV_PY" -m uvicorn services.patch_engine.app.main:app \
   --host "$PATCH_ENGINE_HOST" --port "$PATCH_ENGINE_PORT" \
   "${UVICORN_RELOAD_ARGS[@]}" --reload-dir "services/patch_engine" &
@@ -236,6 +281,7 @@ if [[ ! -d "node_modules" ]]; then
 fi
 
 log "starting frontend (vite) on 127.0.0.1:${FRONTEND_PORT} ..."
+ensure_port_free "$FRONTEND_PORT" "Vite dev server"
 npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort &
 VITE_PID=$!
 

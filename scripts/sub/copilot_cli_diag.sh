@@ -37,7 +37,7 @@ cat <<'TXT'
   In SAW we now set NODE_OPTIONS=--use-system-ca when starting the Copilot CLI server.
 
 If the error persists, generate a PEM bundle from macOS keychains and point Node at it:
-  bash scripts/export_macos_keychain_certs_pem.sh
+  bash scripts/sub/export_macos_keychain_certs_pem.sh
   export SAW_COPILOT_EXTRA_CA_CERTS="$PWD/saw-workspace/certs/macos-keychain.pem"
   # then restart SAW API and re-try.
 TXT

@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Shared helpers
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/ports.sh"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/copilot_server.sh"
+
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-5127}"
@@ -24,7 +30,7 @@ Usage:
   scripts/dev_all_mac.sh [--frontend-port 7176] [--api-port 5127]
 
 Linux/AWS headless bootstrap:
-  scripts/linux_init.sh --compose-up
+  bash scripts/sub/linux_init.sh --compose-up
 
 Env (optional):
   FRONTEND_PORT=5173
@@ -90,65 +96,13 @@ trap cleanup INT TERM EXIT
 
 echo "[dev_all] root: $ROOT_DIR"
 
-if ! command -v lsof >/dev/null 2>&1; then
-  echo "[dev_all] ERROR: lsof not found on PATH (required for port checks)." >&2
-  exit 127
-fi
+saw_require_port_tooling
 
-port_has_listener() {
-  local port="$1"
-  [[ -n "$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)" ]]
-}
+NUKE_PORTS_SCRIPT="$ROOT_DIR/scripts/sub/nuke_ports.sh"
 
-pick_free_port() {
-  local start_port="$1"
-  local tries="$2"
-  local p="$start_port"
-  local i=0
-  while [[ "$i" -lt "$tries" ]]; do
-    if ! port_has_listener "$p"; then
-      echo "$p"
-      return 0
-    fi
-    p=$((p + 1))
-    i=$((i + 1))
-  done
-  return 1
-}
-
-require_port_free() {
-  local port="$1"
-  local label="$2"
-  if port_has_listener "$port"; then
-    echo "[dev_all] ERROR: port ${port} already in use (${label})." >&2
-    echo "[dev_all] Tip: pick another port or unset it to auto-pick: SAW_COPILOT_SERVER_PORT=..." >&2
-    echo "[dev_all] Tip: inspect with: lsof -nP -iTCP:${port} -sTCP:LISTEN" >&2
-    exit 1
-  fi
-}
-
+# Back-compat helper name used throughout this script.
 ensure_port_free() {
-  local port="$1"
-  local label="$2"
-
-  if ! port_has_listener "$port"; then
-    return 0
-  fi
-
-  if [[ ! -f "$ROOT_DIR/scripts/nuke_ports_mac.sh" ]]; then
-    echo "[dev_all] ERROR: port ${port} already in use (${label})." >&2
-    echo "[dev_all] ERROR: scripts/nuke_ports_mac.sh not found; cannot auto-clear ports." >&2
-    exit 1
-  fi
-
-  echo "[dev_all] port ${port} in use (${label}); killing listeners..."
-  bash "$ROOT_DIR/scripts/nuke_ports_mac.sh" "$port" || true
-
-  if port_has_listener "$port"; then
-    echo "[dev_all] ERROR: port ${port} still in use after cleanup (${label})." >&2
-    echo "[dev_all] Tip: inspect with: lsof -nP -iTCP:${port} -sTCP:LISTEN" >&2
-    exit 1
-  fi
+  saw_ensure_port_free "$1" "$2" "$NUKE_PORTS_SCRIPT"
 }
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -210,9 +164,9 @@ if [[ -z "${SAW_COPILOT_EXTRA_CA_CERTS:-}" ]]; then
     export SAW_COPILOT_EXTRA_CA_CERTS="$ROOT_DIR/saw-workspace/certs/macos-keychain.pem"
   else
     # No CA bundle present yet; generate a keychain bundle automatically (macOS).
-    if [[ -f "$ROOT_DIR/scripts/export_macos_keychain_certs_pem.sh" ]]; then
+    if [[ -f "$ROOT_DIR/scripts/sub/export_macos_keychain_certs_pem.sh" ]]; then
       echo "[dev_all] generating macOS keychain CA bundle for Copilot..."
-      bash "$ROOT_DIR/scripts/export_macos_keychain_certs_pem.sh" "$ROOT_DIR/saw-workspace/certs/macos-keychain.pem" >/dev/null
+      bash "$ROOT_DIR/scripts/sub/export_macos_keychain_certs_pem.sh" "$ROOT_DIR/saw-workspace/certs/macos-keychain.pem" >/dev/null
       if [[ -f "$ROOT_DIR/saw-workspace/certs/macos-keychain.pem" ]]; then
         export SAW_COPILOT_EXTRA_CA_CERTS="$ROOT_DIR/saw-workspace/certs/macos-keychain.pem"
       fi
@@ -236,8 +190,8 @@ export SAW_COPILOT_EAGER_START="${SAW_COPILOT_EAGER_START:-1}"
 
 # Use a wrapper so Copilot CLI runs with non-interactive-safe permissions
 # (e.g., allow tools + github.com) without changing other Node processes.
-if [[ -z "${COPILOT_CLI_PATH:-}" ]] && [[ -f "$ROOT_DIR/scripts/copilot_cli_wrapper.sh" ]]; then
-  export COPILOT_CLI_PATH="$ROOT_DIR/scripts/copilot_cli_wrapper.sh"
+if [[ -z "${COPILOT_CLI_PATH:-}" ]] && [[ -f "$ROOT_DIR/scripts/sub/copilot_cli_wrapper.sh" ]]; then
+  export COPILOT_CLI_PATH="$ROOT_DIR/scripts/sub/copilot_cli_wrapper.sh"
 fi
 
 
@@ -256,58 +210,7 @@ export SAW_PATCH_APPLY_ALLOWLIST
 # - External server: set SAW_COPILOT_CLI_URL=localhost:4321 and start `copilot --server --port 4321` yourself
 
 if [[ -z "${SAW_COPILOT_CLI_URL:-}" ]]; then
-  if [[ -z "${SAW_COPILOT_SERVER_PORT:-}" ]]; then
-    # Don't kill anything here; pick a free port instead.
-    if p="$(pick_free_port 4321 40)"; then
-      export SAW_COPILOT_SERVER_PORT="$p"
-      echo "[dev_all] Copilot server mode port: ${SAW_COPILOT_SERVER_PORT}"
-    else
-      echo "[dev_all] ERROR: could not find a free Copilot port in range 4321..4360" >&2
-      exit 1
-    fi
-  else
-    require_port_free "$SAW_COPILOT_SERVER_PORT" "Copilot CLI server mode"
-  fi
-
-  # Start Copilot CLI server as an external managed process.
-  # This avoids the Copilot Python SDK spawning a server per uvicorn reload,
-  # which can leave orphan servers behind and cause port conflicts.
-  COPILOT_SERVER_BIN="${COPILOT_CLI_PATH:-copilot}"
-
-  COPILOT_SERVER_NODE_OPTIONS="${NODE_OPTIONS:-}"
-  if [[ "${SAW_COPILOT_USE_SYSTEM_CA:-1}" != "0" && "${SAW_COPILOT_USE_SYSTEM_CA:-1}" != "false" && "${SAW_COPILOT_USE_SYSTEM_CA:-1}" != "False" ]]; then
-    if [[ "$COPILOT_SERVER_NODE_OPTIONS" != *"--use-system-ca"* ]]; then
-      COPILOT_SERVER_NODE_OPTIONS="${COPILOT_SERVER_NODE_OPTIONS} --use-system-ca"
-    fi
-  fi
-  COPILOT_SERVER_NODE_OPTIONS="$(echo "$COPILOT_SERVER_NODE_OPTIONS" | xargs)"
-
-  echo "[dev_all] starting Copilot CLI server on :${SAW_COPILOT_SERVER_PORT} ..."
-  (
-    if [[ -n "$COPILOT_SERVER_NODE_OPTIONS" ]]; then
-      export NODE_OPTIONS="$COPILOT_SERVER_NODE_OPTIONS"
-    fi
-    if [[ -n "${SAW_COPILOT_EXTRA_CA_CERTS:-}" ]]; then
-      export NODE_EXTRA_CA_CERTS="$SAW_COPILOT_EXTRA_CA_CERTS"
-    fi
-    exec "$COPILOT_SERVER_BIN" --server --port "$SAW_COPILOT_SERVER_PORT"
-  ) &
-  COPILOT_SERVER_PID=$!
-
-  # Wait briefly for the server to bind before starting SAW.
-  for _ in $(seq 1 40); do
-    if port_has_listener "$SAW_COPILOT_SERVER_PORT"; then
-      break
-    fi
-    sleep 0.25
-  done
-  if ! port_has_listener "$SAW_COPILOT_SERVER_PORT"; then
-    echo "[dev_all] ERROR: Copilot CLI server did not start on port ${SAW_COPILOT_SERVER_PORT}." >&2
-    exit 1
-  fi
-
-  export SAW_COPILOT_CLI_URL="localhost:${SAW_COPILOT_SERVER_PORT}"
-  unset SAW_COPILOT_SERVER_PORT
+  saw_start_managed_copilot_cli_server "$NUKE_PORTS_SCRIPT"
 fi
 
 echo "[dev_all] starting SAW API on ${API_HOST}:${API_PORT} ..."
