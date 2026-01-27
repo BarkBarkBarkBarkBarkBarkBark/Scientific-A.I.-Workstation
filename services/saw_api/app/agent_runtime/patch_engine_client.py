@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from ..agent_log import append_agent_event, maybe_log_text
+from ..settings import get_settings
 
 
 def patch_engine_base_url() -> str:
@@ -13,6 +17,7 @@ def patch_engine_base_url() -> str:
 
 
 def http_json(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, dict[str, Any] | None, str]:
+    started = time.time()
     data = None
     headers = {"Accept": "application/json"}
     if body is not None:
@@ -22,6 +27,21 @@ def http_json(method: str, url: str, body: dict[str, Any] | None = None) -> tupl
     try:
         with urlopen(req, timeout=30) as resp:  # nosec - local dev endpoints
             raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                append_agent_event(
+                    get_settings(),
+                    {
+                        "type": "agent.http.patch_engine",
+                        "method": method.upper(),
+                        "url": url,
+                        "status": int(resp.status),
+                        "duration_ms": int(max(0.0, (time.time() - started) * 1000.0)),
+                        "request_body": maybe_log_text(json.dumps(body or {}, ensure_ascii=False)) if body is not None else None,
+                        "response_body": maybe_log_text(raw),
+                    },
+                )
+            except Exception:
+                pass
             try:
                 return int(resp.status), (json.loads(raw) if raw else None), raw
             except Exception:
@@ -36,8 +56,37 @@ def http_json(method: str, url: str, body: dict[str, Any] | None = None) -> tupl
             j = json.loads(raw) if raw else None
         except Exception:
             j = None
+        try:
+            append_agent_event(
+                get_settings(),
+                {
+                    "type": "agent.http.patch_engine",
+                    "method": method.upper(),
+                    "url": url,
+                    "status": int(getattr(e, "code", 0) or 0),
+                    "duration_ms": int(max(0.0, (time.time() - started) * 1000.0)),
+                    "request_body": maybe_log_text(json.dumps(body or {}, ensure_ascii=False)) if body is not None else None,
+                    "response_body": maybe_log_text(raw),
+                },
+            )
+        except Exception:
+            pass
         return int(getattr(e, "code", 0) or 0), (j if isinstance(j, dict) else None), raw
     except Exception as e:
+        try:
+            append_agent_event(
+                get_settings(),
+                {
+                    "type": "agent.http.patch_engine",
+                    "method": method.upper(),
+                    "url": url,
+                    "status": 0,
+                    "duration_ms": int(max(0.0, (time.time() - started) * 1000.0)),
+                    "error": str(e)[:500],
+                },
+            )
+        except Exception:
+            pass
         return 0, None, str(e)
 
 

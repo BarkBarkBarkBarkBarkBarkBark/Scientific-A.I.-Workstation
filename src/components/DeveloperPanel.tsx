@@ -5,6 +5,8 @@ import { sourceFiles } from '../dev/sourceFiles'
 import { useSawStore } from '../store/useSawStore'
 import { fetchDevCaps, fetchDevFile, fetchDevTree, setDevCaps, type CapsManifest, type DevTreeNode } from '../dev/runtimeTree'
 import { ResizableDivider } from './ui/ResizableDivider'
+import { runIntrospection } from '../dev/introspectionClient'
+import { validateIntrospectionPacket } from '../ai/introspectionValidator'
 
 type TreeNode =
   | { kind: 'dir'; name: string; path: string; children: TreeNode[] }
@@ -124,6 +126,9 @@ export function DeveloperPanel() {
   const [dbHealth, setDbHealth] = useState<string>('')
   const [pluginsList, setPluginsList] = useState<string>('')
   const [filesWidth, setFilesWidth] = useState<number>(280)
+  const [attestationRunning, setAttestationRunning] = useState(false)
+  const [attestationSummary, setAttestationSummary] = useState<string>('')
+  const [attestationRaw, setAttestationRaw] = useState<string>('')
 
   const selected = useMemo(() => {
     return sourceFiles.find((f) => f.path === selectedPath) ?? sourceFiles[0]
@@ -449,6 +454,53 @@ export function DeveloperPanel() {
                 Plugins: disabled (set <span className="font-mono text-zinc-300">SAW_ENABLE_PLUGINS=1</span> before <span className="font-mono text-zinc-300">npm run dev</span>)
               </div>
             )}
+
+            <details className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/30 p-2">
+              <summary className="cursor-pointer select-none text-[11px] font-semibold text-zinc-300">
+                Attestation
+              </summary>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  disabled={attestationRunning}
+                  onClick={async () => {
+                    setAttestationRunning(true)
+                    setAttestationSummary('')
+                    setAttestationRaw('')
+                    try {
+                      const packet = await runIntrospection()
+                      const v = validateIntrospectionPacket(packet)
+                      if (!v.ok) {
+                        setAttestationSummary(`Schema validation failed:\n${v.error}`)
+                        setAttestationRaw(JSON.stringify(packet, null, 2).slice(0, 50_000))
+                      } else {
+                        const notes = (v.value as any)?.notes
+                        const s = notes?.embedded_probe_summary
+                        if (s && typeof s === 'object') {
+                          setAttestationSummary(`passes: ${s.passes ?? 0}  fails: ${s.fails ?? 0}  unavailable: ${s.unavailable ?? 0}`)
+                        } else {
+                          setAttestationSummary('Schema ok (no embedded summary)')
+                        }
+                        setAttestationRaw(JSON.stringify(v.value, null, 2).slice(0, 50_000))
+                      }
+                    } catch (e: any) {
+                      setAttestationSummary(String(e?.message ?? e))
+                    } finally {
+                      setAttestationRunning(false)
+                    }
+                  }}
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+                >
+                  {attestationRunning ? 'Running…' : 'Run Attestation'}
+                </button>
+              </div>
+              {attestationSummary ? (
+                <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-zinc-200">{attestationSummary}</pre>
+              ) : null}
+              {attestationRaw ? (
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">{attestationRaw}</pre>
+              ) : null}
+            </details>
           </div>
         </div>
       </Panel>

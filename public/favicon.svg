@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>SAW</title>
+  <desc>Cosmo Saw brand mark (stylized saw with star)</desc>
+
+  <!-- Transparent background -->
+  <rect width="128" height="128" fill="none" />
+
+  <!-- Cosmo accent: a small star */ -->
+  <path
+    d="M92 18 L95 26 L104 26 L97 31 L100 39 L92 34 L84 39 L87 31 L80 26 L89 26 Z"
+    fill="#111827"
+  />
+
+  <!-- Saw handle -->
+  <path
+    d="M24 74
+       C24 64 32 56 42 56
+       H56
+       C60 56 64 60 64 64
+       V72
+       C64 76 60 80 56 80
+       H48
+       C46 86 40 90 34 90
+       C28 90 24 85 24 80
+       Z"
+    fill="#111827"
+  />
+
+  <!-- Handle cutout -->
+  <path
+    d="M34 74
+       C34 69 38 65 43 65
+       H52
+       C54 65 56 67 56 69
+       V71
+       C56 73 54 75 52 75
+       H44
+       C41 75 39 77 39 80
+       C39 83 37 84 34 84
+       C31 84 30 82 30 80
+       C30 78 31 76 34 74
+       Z"
+    fill="#F9FAFB"
+  />
+
+  <!-- Saw blade (base) -->
+  <path
+    d="M58 64
+       L110 52
+       C114 51 118 54 117 58
+       L109 92
+       C108 96 104 99 100 98
+       L58 88
+       Z"
+    fill="#111827"
+  />
+
+  <!-- Teeth (simple zig-zag along bottom edge) -->
+  <path
+    d="M60 86
+       L66 88 L63 94
+       L71 90 L68 96
+       L76 92 L73 98
+       L81 94 L78 100
+       L86 96 L83 102
+       L91 98 L88 104
+       L96 100 L93 106
+       L101 102 L98 108"
+    fill="none"
+    stroke="#F9FAFB"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Blade highlight -->
+  <path
+    d="M64 70 L108 60"
+    stroke="#F9FAFB"
+    stroke-width="4"
+    stroke-linecap="round"
+    opacity="0.9"
+  />
+</svg>

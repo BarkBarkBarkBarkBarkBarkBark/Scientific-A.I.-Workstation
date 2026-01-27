@@ -1,0 +1,185 @@
+saw_machine_readable_instructions:
+  spec_version: "0.2"
+  title: "Make runtime endpoint testing possible + close remaining attestation gaps"
+  intent:
+    - "Enable the app agent/test runner to verify /api/dev/* and /api/saw/* at runtime (not just static file reads)."
+    - "Fix remaining fails: missing CAPS_RULES.md + missing UI 'Run Attestation' wiring."
+    - "Eliminate schema drift around evidence.kind."
+    - "Stabilize reproducibility by controlling which attestation artifacts are tracked in git."
+
+  current_findings_from_TestReport_v1:
+    blockers:
+      - id: "NO_HTTP_CLIENT_TOOL"
+        symptom: "All HTTP probes are unavailable; runner cannot call /api/dev/* or /api/saw/*."
+        impact: "Cannot verify endpoints; only static inspection possible."
+    concrete_failures:
+      - id: "MISSING_CAPS_RULES_MD"
+        symptom: "saw-workspace/machine-context/security/CAPS_RULES.md NOT_FOUND"
+        impact: "Caps precedence/normalization not documented; policy debt likely."
+      - id: "MISSING_UI_ATTESTATION"
+        symptom: "No UI affordance for 'Run Attestation' located; no client schema validation found."
+        impact: "Users can’t reliably run or trust attestation from the app UI."
+    drift_risk:
+      - id: "EVIDENCE_KIND_ENUM_DRIFT"
+        symptom: "Schema allows kind: tool_call|file_read|command but tests/prompts reference shell_command."
+        impact: "Validation inconsistencies; future packets fail schema checks."
+
+  decision_point:
+    choose_one_testing_surface:
+      option_A_http_probe_tool:
+        description: "Add a safe HTTP client tool in Patch Engine tools layer to call localhost-only endpoints."
+        pros: ["Minimal surface change", "Lets agent test arbitrary endpoints", "Works without shell"]
+        cons: ["Needs SSRF safeguards", "Must tightly restrict URLs"]
+      option_B_direct_tools_wrapping_endpoints:
+        description: "Expose the endpoints as first-class tools (introspection_run/tools_list/git_info/saw_agent_health)."
+        pros: ["No HTTP client needed", "Cleaner provenance in evidence", "Easier to secure"]
+        cons: ["More wrapper code", "Less flexible for ad-hoc endpoint testing"]
+    recommended: "option_B_direct_tools_wrapping_endpoints"
+
+  required_outcomes:
+    - id: "O1_RUNTIME_TESTS_POSSIBLE"
+      acceptance:
+        - "App agent can produce a TestReport_v1 where P0–P3 are PASS/FAIL (not UNAVAILABLE)."
+        - "All runtime checks include evidence entries with provenance."
+    - id: "O2_DOCS_COMPLETE"
+      acceptance:
+        - "CAPS_RULES.md exists and is linked from START_HERE.md."
+    - id: "O3_UI_CAN_RUN_ATTESTATION"
+      acceptance:
+        - "UI has a 'Run Attestation' button/panel that calls attestation and validates schema v1.1."
+    - id: "O4_SCHEMA_CONSISTENT"
+      acceptance:
+        - "Evidence kind enum is consistent across schema, producers, and tests."
+    - id: "O5_REPRODUCIBLE_GIT_STATE"
+      acceptance:
+        - "Attestation output artifacts policy is explicit (tracked vs ignored)."
+
+  workplan:
+    phase_1_enable_runtime_testing:
+      - task_id: "T1_ADD_TOOL_WRAPPERS_FOR_RUNTIME_PROBES"
+        goal: "Make the following available as tools callable from chat without HTTP client support."
+        implement_in: "Patch Engine tool registry (services/patch_engine/app/tools/* + routers/tools.py)"
+        tools_to_add:
+          - tool_id: "functions.introspection_run"
+            maps_to: "same code path as /api/dev/introspection/run"
+            side_effects: ["disk_read"]
+            approval_required: false
+            returns: "IntrospectionPacket_v1_1"
+          - tool_id: "functions.tools_list"
+            maps_to: "same code path as /api/dev/tools/list"
+            side_effects: ["disk_read"]
+            approval_required: false
+            returns: "{tools:[...]}"
+          - tool_id: "functions.git_info"
+            maps_to: "same code path as /api/dev/git/info"
+            side_effects: ["disk_read","subprocess"]
+            approval_required: false
+            returns: "{repo_root,head,branch,is_dirty,status_porcelain}"
+          - tool_id: "functions.saw_agent_health"
+            maps_to: "calls SAW API agent health via in-process import OR a safe internal call"
+            side_effects: ["network"]
+            approval_required: false
+            returns: "{llm_available:boolean,agent_chat_route_ok:boolean,last_error:string}"
+        constraints:
+          - "Do not require shell; use existing internal codepaths and safe subprocess where already allowed."
+          - "If saw_agent_health requires HTTP, it must be localhost-only and hard-coded allowlist (127.0.0.1, ::1)."
+        registration:
+          - "Add all tools to the authoritative tools registry so /api/dev/tools/list also reports them."
+        acceptance_tests:
+          - "Agent can call each tool and obtain a non-empty response."
+          - "IntrospectionPacket produced by functions.introspection_run validates against schema v1.1."
+
+      - task_id: "T2_ADD_SAW_AGENT_HEALTH_ROUTE"
+        goal: "Ensure /api/saw/agent/health exists and is discoverable."
+        implement_in: "SAW API (services/saw_api/app)"
+        route:
+          method: "GET"
+          path: "/api/saw/agent/health"
+          response: "{llm_available:boolean,agent_chat_route_ok:boolean,last_error:string}"
+        behavior:
+          - "llm_available: true if model/provider configured and can perform a cheap internal ping (no billing-heavy call)."
+          - "agent_chat_route_ok: true if chat handler is registered and dependencies satisfied."
+          - "last_error: last known agent error string or empty."
+        acceptance_tests:
+          - "Route appears in machine-context api_endpoints.json (if you generate it)."
+          - "Calling from within app returns HTTP 200 with required fields."
+
+    phase_2_close_reported_failures:
+      - task_id: "T3_CREATE_CAPS_RULES_DOC"
+        goal: "Document caps normalization + precedence to eliminate policy ambiguity."
+        file_to_create: "saw-workspace/machine-context/security/CAPS_RULES.md"
+        required_sections:
+          - "Purpose and threat model"
+          - "Path normalization rules (no '.', no './', trailing slash policy)"
+          - "Precedence (longest matching prefix wins; tie-breaker rule)"
+          - "Examples (allowlist/denylist cases)"
+          - "How to update .saw/caps.json safely"
+        link_from:
+          - "saw-workspace/machine-context/START_HERE.md"
+        acceptance_tests:
+          - "File exists and is readable via dev_file."
+          - "START_HERE.md links to it."
+
+      - task_id: "T4_ADD_UI_RUN_ATTESTATION"
+        goal: "Expose 'Run Attestation' in UI and validate response."
+        implement_in: "Frontend (src/)"
+        requirements:
+          - "Add button/menu item in DeveloperPanel or a new AgentStatus/Attestation panel."
+          - "On click: call /api/dev/introspection/run (or the shared client) and render result summary."
+          - "Validate response using IntrospectionPacket_v1_1.schema.json (or compiled TS schema) before display."
+          - "On validation failure: show clear error and raw excerpt."
+        suggested_files:
+          - "src/components/DeveloperPanel.tsx (or new src/components/AttestationPanel.tsx)"
+          - "src/dev/introspectionClient.ts (shared fetch wrapper)"
+          - "src/ai/introspectionSchema.ts (validator)"
+        acceptance_tests:
+          - "UI shows a visible control labeled 'Run Attestation'."
+          - "Network call is made; success shows passes/warns/fails counts."
+          - "Validation errors are surfaced."
+
+    phase_3_remove_schema_drift_and harden evidence:
+      - task_id: "T5_STANDARDIZE_EVIDENCE_KIND_ENUM"
+        goal: "Make evidence kinds consistent across schema, producers, and test prompts."
+        choose_enum:
+          recommended: ["tool_call","file_read","shell_command"]
+        actions:
+          - "Update IntrospectionPacket_v1_1.schema.json EvidenceItem.kind enum to match chosen set."
+          - "Update producers to emit only allowed kinds."
+          - "Update tests/prompts/docs to reference the chosen kinds (no 'command' vs 'shell_command' mismatch)."
+        acceptance_tests:
+          - "Schema validation passes for produced packet."
+          - "TestReport mentions no enum drift risk."
+
+    phase_4_reproducibility_and_git_hygiene:
+      - task_id: "T6_DEFINE_ATTESTATION_ARTIFACT_POLICY"
+        goal: "Prevent noisy diffs and keep repo reproducible."
+        decisions:
+          - "Track docs and schemas under saw-workspace/machine-context/"
+          - "Ignore runtime outputs under saw-workspace/introspection_docs/*.yaml (except README.md)"
+        implement:
+          - "Add patterns to .gitignore as needed"
+          - "Add README.md in saw-workspace/introspection_docs explaining retention policy"
+        acceptance_tests:
+          - "git status stays clean after running attestation (except intentional tracked files)."
+
+  validation_plan:
+    run_after_changes:
+      - "Re-run app agent TestReport prompt."
+      - "Expected: P0–P3 are PASS/FAIL using tool wrappers (not UNAVAILABLE)."
+      - "Expected: P5 and P6 become PASS after docs+UI work."
+    minimal_manual_smoke:
+      - "Start dev stack via scripts/dev_all_mac.sh"
+      - "Open UI → Developer/Attestation panel → Run Attestation"
+      - "Confirm schema validation + display"
+
+  deliverable_checklist:
+    must_exist:
+      - "saw-workspace/machine-context/security/CAPS_RULES.md"
+      - "saw-workspace/machine-context/introspection/IntrospectionPacket_v1_1.schema.json (updated if enum standardized)"
+      - "Patch Engine tools: functions.introspection_run, functions.tools_list, functions.git_info, functions.saw_agent_health"
+      - "SAW API: GET /api/saw/agent/health"
+      - "UI: Run Attestation affordance + schema validation"
+    must_be_true:
+      - "Agent runtime tests no longer blocked by missing HTTP tool"
+      - "Evidence kinds consistent across system"
+      - "Artifacts policy prevents runaway git noise"

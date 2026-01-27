@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import contextvars
-from datetime import datetime
+from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import os
 import pty
@@ -14,6 +15,8 @@ import subprocess
 import termios
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from functools import lru_cache
 from dataclasses import dataclass
@@ -115,6 +118,10 @@ SAW_PATCH_ENGINE_USE_STASH = _truthy(os.environ.get("SAW_PATCH_ENGINE_USE_STASH"
 
 SAW_ENABLE_TERMINAL = _truthy(os.environ.get("SAW_ENABLE_TERMINAL", "0"))
 SAW_TERMINAL_ROOT = str(os.environ.get("SAW_TERMINAL_ROOT") or "saw-workspace/sandbox").replace("\\", "/")
+
+# Safety: avoid loading huge files into memory via dev_file.
+DEV_FILE_MAX_BYTES = int(os.environ.get("SAW_DEV_FILE_MAX_BYTES") or 2_000_000)
+DEV_FILE_HEAD_MAX_LINES = 40
 
 _PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -267,31 +274,95 @@ def save_caps(m: CapsManifest) -> None:
         f.write(m.model_dump_json())
 
 
+def _norm_caps_path(p: str) -> str:
+    s = str(p or "").replace("\\", "/").strip()
+    if s in (".", "./"):
+        return "."
+    # Normalize leading ./ to keep rules deterministic.
+    if s.startswith("./"):
+        s = s[2:]
+    # Collapse duplicate slashes.
+    while "//" in s:
+        s = s.replace("//", "/")
+    return s
+
+
 def get_caps_for_path(m: CapsManifest, rel: str) -> CapsRule:
     # Default: readable, not writable/deletable.
     default = CapsRule(path="*", r=True, w=False, d=False)
-    p = (rel or "").replace("\\", "/")
+    p = _norm_caps_path(rel)
     best: CapsRule | None = None
     best_len = -1
-    for rule in m.rules:
-        rp = str(rule.path or "").replace("\\", "/")
+    best_idx = -1
+    for i, rule in enumerate(m.rules):
+        rp = _norm_caps_path(rule.path)
         if not rp:
             continue
-        # Root rule "." or "./" applies to everything.
-        if rp in (".", "./"):
-            if 1 > best_len:
+
+        # Root rule matches everything but should lose to more specific rules.
+        if rp == ".":
+            match_len = 0
+            if (match_len > best_len) or (match_len == best_len and i > best_idx):
                 best = rule
-                best_len = 1
+                best_len = match_len
+                best_idx = i
             continue
+
+        # Directory prefixes.
         if rp.endswith("/"):
-            if p.startswith(rp) and len(rp) > best_len:
+            if p.startswith(rp):
+                match_len = len(rp)
+                if (match_len > best_len) or (match_len == best_len and i > best_idx):
+                    best = rule
+                    best_len = match_len
+                    best_idx = i
+            continue
+
+        # Exact file/path match.
+        if p == rp:
+            match_len = len(rp)
+            if (match_len > best_len) or (match_len == best_len and i > best_idx):
                 best = rule
-                best_len = len(rp)
-        else:
-            if p == rp and len(rp) > best_len:
-                best = rule
-                best_len = len(rp)
+                best_len = match_len
+                best_idx = i
+
     return best or default
+
+
+def _caps_conflicts(m: CapsManifest) -> list[dict[str, Any]]:
+    """Best-effort overlap/conflict detector for caps rules."""
+    conflicts: list[dict[str, Any]] = []
+    by_norm: dict[str, list[CapsRule]] = {}
+    for r in m.rules:
+        by_norm.setdefault(_norm_caps_path(r.path), []).append(r)
+
+    # Duplicate normalized paths with different perms.
+    for k, rules in by_norm.items():
+        if len(rules) <= 1:
+            continue
+        perms = {(bool(r.r), bool(r.w), bool(r.d)) for r in rules}
+        if len(perms) > 1:
+            conflicts.append(
+                {
+                    "type": "duplicate_path",
+                    "path": k,
+                    "rules": [rr.model_dump() for rr in rules],
+                    "message": "Multiple rules normalize to the same path with different permissions",
+                }
+            )
+
+    # Specific ambiguity: both '.' and './' present (even if perms match).
+    raw_paths = {str(r.path or "") for r in m.rules}
+    if ("." in raw_paths) and ("./" in raw_paths):
+        conflicts.append(
+            {
+                "type": "dot_vs_dot_slash",
+                "paths": [".", "./"],
+                "message": "Both '.' and './' exist; normalization removes this ambiguity",
+            }
+        )
+
+    return conflicts
 
 
 # -----------------------
@@ -404,6 +475,67 @@ def read_tree(root_abs: str, rel: str, depth: int, max_entries: int) -> DevTreeN
     return node
 
 
+def read_tree_with_meta(root_abs: str, rel: str, depth: int, max_entries: int) -> tuple[DevTreeNode, bool]:
+    """Return (tree, truncated) where truncated means we hit max_entries in any scanned directory."""
+    abs_dir = os.path.abspath(os.path.join(root_abs, rel or "."))
+    root_resolved = os.path.abspath(root_abs)
+    if not abs_dir.startswith(root_resolved):
+        return DevTreeNode(type="dir", name=".", path=rel or ".", children=[]), False
+
+    name = os.path.basename((rel or ".").replace("\\", "/")) if rel and rel != "." else "."
+    node = DevTreeNode(type="dir", name=name, path=rel or ".", children=[])
+    if depth <= 0:
+        return node, False
+
+    try:
+        entries = list(os.scandir(abs_dir))
+    except Exception:
+        return node, False
+
+    children: list[DevTreeNode] = []
+    count = 0
+    truncated_here = False
+    truncated_any = False
+    for e in entries:
+        if count >= max_entries:
+            truncated_here = True
+            break
+        try:
+            child_rel = (rel + "/" + e.name) if rel and rel != "." else e.name
+            child_rel = child_rel.replace("\\", "/")
+            if e.is_dir(follow_symlinks=False):
+                if is_blocked_for_tree(child_rel):
+                    continue
+                child_node, child_truncated = read_tree_with_meta(root_abs, child_rel, depth - 1, max_entries)
+                children.append(child_node)
+                truncated_any = truncated_any or child_truncated
+            else:
+                children.append(DevTreeNode(type="file", name=e.name, path=child_rel, children=[]))
+            count += 1
+        except Exception:
+            continue
+
+    # Stable sort: dirs first then name.
+    children.sort(key=lambda c: (0 if c.type == "dir" else 1, c.name))
+    node.children = children
+    return node, (truncated_here or truncated_any)
+
+
+def _head_40_lines(text: str) -> str:
+    # Preserve newlines (splitlines(True) keeps line endings).
+    if not text:
+        return ""
+    lines = text.splitlines(True)
+    return "".join(lines[:DEV_FILE_HEAD_MAX_LINES])
+
+
+def _dev_error(code: str, message: str, detail: str | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {"code": code, "message": message}
+    if detail:
+        out["detail"] = detail
+    return out
+
+
 # -----------------------
 # Helpers: git + validation
 # -----------------------
@@ -476,6 +608,11 @@ def run_git_allow_fail(args: list[str]) -> dict[str, Any]:
 
 def git_head() -> str:
     return run_git(["rev-parse", "HEAD"])["stdout"].strip()
+
+
+def git_branch() -> str:
+    # Empty string in detached HEAD is expected.
+    return run_git_allow_fail(["branch", "--show-current"]).get("stdout", "").strip()
 
 
 def git_dirty() -> str:
@@ -1142,6 +1279,13 @@ async def dev_caps_post(req: Request) -> dict[str, Any]:
     return m.model_dump()
 
 
+@app.get("/api/dev/caps/validate")
+def dev_caps_validate() -> dict[str, Any]:
+    m = load_caps()
+    conflicts = _caps_conflicts(m)
+    return {"ok": len(conflicts) == 0, "conflicts": conflicts, "updatedAt": m.updatedAt}
+
+
 @app.get("/api/dev/session/log")
 def dev_session_log(tail: int = 200) -> dict[str, Any]:
     tail_n = max(10, min(2000, int(tail)))
@@ -1160,8 +1304,8 @@ def dev_tree(
     max_entries = max(200, min(10000, int(max_entries_q)))
     if root_rel != "." and is_blocked_for_tree(root_rel):
         raise HTTPException(status_code=400, detail={"error": "invalid_root"})
-    t = read_tree(ROOT, root_rel, depth_n, max_entries)
-    return {"root": root_rel, "depth": depth_n, "tree": t.model_dump()}
+    t, truncated = read_tree_with_meta(ROOT, root_rel, depth_n, max_entries)
+    return {"root": root_rel, "depth": depth_n, "tree": t.model_dump(), "truncated": truncated}
 
 
 @app.get("/api/dev/file")
@@ -1174,9 +1318,56 @@ def dev_file_get(path: str) -> dict[str, Any]:  # noqa: A002
     if not caps.r:
         raise HTTPException(status_code=403, detail={"error": "forbidden", "op": "read", "path": rel})
     try:
-        content = open(resolved.abs, "r", encoding="utf-8").read()
-        return {"path": rel, "content": content}
+        if not os.path.exists(resolved.abs):
+            return {
+                "path": rel,
+                "content": "",
+                "bytes": None,
+                "sha256": None,
+                "head_40_lines": "",
+                "error": _dev_error("NOT_FOUND", "File does not exist"),
+            }
+
+        size = None
+        try:
+            size = int(os.path.getsize(resolved.abs))
+        except Exception:
+            size = None
+
+        if size is not None and size > DEV_FILE_MAX_BYTES:
+            return {
+                "path": rel,
+                "content": "",
+                "bytes": size,
+                "sha256": None,
+                "head_40_lines": "",
+                "error": _dev_error("TOO_LARGE", "File exceeds size limit", f"max_bytes={DEV_FILE_MAX_BYTES}"),
+            }
+
+        raw = open(resolved.abs, "rb").read()
+        sha256 = hashlib.sha256(raw).hexdigest()
+        bytes_n = len(raw)
+        try:
+            content = raw.decode("utf-8")
+            return {
+                "path": rel,
+                "content": content,
+                "bytes": bytes_n,
+                "sha256": sha256,
+                "head_40_lines": _head_40_lines(content),
+                "error": None,
+            }
+        except UnicodeDecodeError as e:
+            return {
+                "path": rel,
+                "content": "",
+                "bytes": bytes_n,
+                "sha256": sha256,
+                "head_40_lines": "",
+                "error": _dev_error("DECODE_ERROR", "File is not valid UTF-8", str(e)[:500]),
+            }
     except Exception as e:
+        # Keep error object machine-readable (older callers still treat non-2xx as failure).
         raise HTTPException(status_code=404, detail={"error": "read_failed", "details": str(e)})
 
 
@@ -1533,6 +1724,410 @@ def dev_git_status(path: str | None = None) -> dict[str, Any]:  # noqa: A002
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error": "git_failed", "details": str(e)})
+
+
+@app.get("/api/dev/git/info")
+def dev_git_info() -> dict[str, Any]:
+    """Read-only git info for attestations (no direct .git reads required)."""
+    try:
+        status_porcelain = git_dirty()
+        return {
+            "repo_root": ROOT,
+            "head": git_head(),
+            "branch": git_branch(),
+            "is_dirty": bool(status_porcelain.strip()),
+            "status_porcelain": status_porcelain,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "git_info_failed", "details": str(e)})
+
+
+def _claim(value: Any, *, status: Literal["proven", "unproven"], evidence_ref: list[int]) -> dict[str, Any]:
+    return {"value": value, "status": status, "evidence_ref": list(evidence_ref or [])}
+
+
+def _safe_localhost_get_json(url: str, *, timeout_s: float = 1.5) -> dict[str, Any]:
+    # SSRF safety: only allow localhost.
+    u = str(url or "").strip()
+    if not u:
+        raise ValueError("missing_url")
+    if not (u.startswith("http://127.0.0.1") or u.startswith("http://localhost") or u.startswith("http://[::1]") or u.startswith("http://::1")):
+        raise ValueError("non_localhost_url")
+    req = urllib.request.Request(u, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310
+        raw = resp.read()
+        return json.loads(raw.decode("utf-8") or "{}")
+
+
+def _file_read_evidence(path: str) -> dict[str, Any]:
+    rel = str(path or "").replace("\\", "/")
+    try:
+        r = dev_file_get(rel)
+        return {
+            "kind": "file_read",
+            "path": rel,
+            "bytes": r.get("bytes"),
+            "sha256": r.get("sha256"),
+            "head_40_lines": r.get("head_40_lines") or "",
+            "error": r.get("error"),
+        }
+    except HTTPException as e:
+        detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+        return {
+            "kind": "file_read",
+            "path": rel,
+            "bytes": None,
+            "sha256": None,
+            "head_40_lines": "",
+            "error": _dev_error(str(detail.get("error") or "HTTP_ERROR"), "file_read_failed", json.dumps(detail)[:500]),
+        }
+    except Exception as e:
+        return {
+            "kind": "file_read",
+            "path": rel,
+            "bytes": None,
+            "sha256": None,
+            "head_40_lines": "",
+            "error": _dev_error("EXCEPTION", "file_read_failed", str(e)[:500]),
+        }
+
+
+def _build_introspection_packet() -> dict[str, Any]:
+    # Evidence indices referenced by claims.
+    evidence: list[dict[str, Any]] = []
+
+    def add_tool_ev(tool_id: str) -> int:
+        evidence.append({"kind": "tool_call", "tool_id": str(tool_id or "")})
+        return len(evidence) - 1
+
+    def add_file_ev(path: str) -> int:
+        evidence.append(_file_read_evidence(path))
+        return len(evidence) - 1
+
+    ev_introspection = add_tool_ev("dev.introspection.run")
+    ev_git = add_tool_ev("dev.git.info")
+    ev_tools = add_tool_ev("dev.tools.list")
+
+    # Canonical file reads (helpful for downstream attestations).
+    ev_start_here = add_file_ev("saw-workspace/machine-context/START_HERE.md")
+    ev_caps = add_file_ev(".saw/caps.json")
+    ev_caps_rules = add_file_ev("saw-workspace/machine-context/security/CAPS_RULES.md")
+
+    # Git state
+    git = {}
+    try:
+        git = dev_git_info()
+    except Exception:
+        git = {"head": "", "branch": "", "is_dirty": "unknown", "status_porcelain": ""}
+
+    # Tool surface
+    tool_surface: list[dict[str, Any]] = []
+    try:
+        tool_surface = list((dev_tools_list() or {}).get("tools") or [])
+    except Exception:
+        tool_surface = []
+
+    # SAW agent health (best-effort, localhost-only)
+    saw_health: dict[str, Any] | None = None
+    saw_health_err = ""
+    ev_saw_health: int | None = None
+    try:
+        base = str(os.environ.get("SAW_API_URL") or "http://127.0.0.1:5127").rstrip("/")
+        saw_health = _safe_localhost_get_json(base + "/agent/health")
+        ev_saw_health = add_tool_ev("saw.agent.health")
+    except Exception as e:
+        saw_health = None
+        saw_health_err = str(e)
+
+    llm_available: Any = "unknown"
+    agent_chat_ok: Any = "unknown"
+    last_error: str = ""
+    if isinstance(saw_health, dict):
+        llm_available = bool(saw_health.get("llm_available"))
+        agent_chat_ok = bool(saw_health.get("agent_chat_route_ok"))
+        last_error = str(saw_health.get("last_error") or "")
+
+    # Lightweight embedded probe summary for UI.
+    results: list[dict[str, Any]] = []
+    def add_result(pid: str, status: str, why: str) -> None:
+        results.append({"id": pid, "status": status, "why": why})
+
+    add_result("P0_INTROSPECTION_RUN", "pass", "packet_generated")
+    add_result("P1_TOOL_CATALOG", "pass" if len(tool_surface) > 0 else "fail", "tools_list_ok" if tool_surface else "empty_tools")
+    add_result(
+        "P2_GIT_INFO",
+        "pass" if str(git.get("head") or "").strip() and str(git.get("branch") or "").strip() else "fail",
+        "git_info_ok" if str(git.get("head") or "").strip() else "missing_head_or_branch",
+    )
+    add_result(
+        "P3_SAW_AGENT_HEALTH",
+        "pass" if isinstance(saw_health, dict) else "unavailable",
+        "ok" if isinstance(saw_health, dict) else (saw_health_err or "unavailable"),
+    )
+    summary = {
+        "passes": sum(1 for r in results if r.get("status") == "pass"),
+        "fails": sum(1 for r in results if r.get("status") == "fail"),
+        "unavailable": sum(1 for r in results if r.get("status") == "unavailable"),
+    }
+
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return {
+        "schema_version": "1.1",
+        "timestamp_utc": ts,
+        "agent_identity": {
+            "name": _claim("patch_engine", status="proven", evidence_ref=[ev_introspection]),
+            "agent_kind": _claim("service", status="proven", evidence_ref=[ev_introspection]),
+            "version": _claim("0.1", status="proven", evidence_ref=[ev_introspection]),
+            "build_hash": _claim(str(git.get("head") or "unknown"), status="proven", evidence_ref=[ev_git]),
+        },
+        "runtime": {
+            "cwd": _claim(os.getcwd(), status="proven", evidence_ref=[ev_introspection]),
+            "repo_root": _claim(ROOT, status="proven", evidence_ref=[ev_introspection]),
+            "workspace_root_guess": _claim("saw-workspace", status="proven", evidence_ref=[ev_introspection]),
+        },
+        "git_state": {
+            "head": _claim(str(git.get("head") or ""), status="proven", evidence_ref=[ev_git]),
+            "branch": _claim(str(git.get("branch") or ""), status="proven", evidence_ref=[ev_git]),
+            "is_dirty": _claim(bool(git.get("is_dirty")) if str(git.get("status_porcelain") or "").strip() else False, status="proven", evidence_ref=[ev_git]),
+            "status_porcelain": _claim(str(git.get("status_porcelain") or ""), status="proven", evidence_ref=[ev_git]),
+        },
+        "capabilities": {
+            "patch_apply_allowlist": PATCH_APPLY_ALLOWLIST,
+            "terminal_enabled": bool(SAW_ENABLE_TERMINAL),
+        },
+        "policies_claimed": {
+            "validation_mode": VALIDATION_MODE,
+        },
+        "tool_surface": tool_surface,
+        "health": {
+            "llm_available": _claim(llm_available, status="proven" if isinstance(saw_health, dict) else "unproven", evidence_ref=[ev_saw_health] if ev_saw_health is not None else []),
+            "agent_chat_route_ok": _claim(agent_chat_ok, status="proven" if isinstance(saw_health, dict) else "unproven", evidence_ref=[ev_saw_health] if ev_saw_health is not None else []),
+            "last_error": _claim(last_error, status="proven" if isinstance(saw_health, dict) else "unproven", evidence_ref=[ev_saw_health] if ev_saw_health is not None else []),
+        },
+        "evidence": evidence,
+        "notes": {
+            "embedded_probe_results": results,
+            "embedded_probe_summary": summary,
+            "evidence_indices": {
+                "introspection": ev_introspection,
+                "git": ev_git,
+                "tools": ev_tools,
+                "start_here": ev_start_here,
+                "caps": ev_caps,
+                "caps_rules": ev_caps_rules,
+            },
+        },
+    }
+
+
+@app.get("/api/dev/introspection/run")
+def dev_introspection_run_get() -> dict[str, Any]:
+    return _build_introspection_packet()
+
+
+@app.post("/api/dev/introspection/run")
+async def dev_introspection_run_post(_: Request) -> dict[str, Any]:
+    return _build_introspection_packet()
+
+
+@app.get("/api/dev/tools/list")
+def dev_tools_list() -> dict[str, Any]:
+    """Canonical Patch Engine tool registry (used by attestation + agents)."""
+
+    terminal_available = bool(SAW_ENABLE_TERMINAL)
+
+    def tool(
+        tool_id: str,
+        *,
+        backend: Literal["saw_api", "patch_engine", "mcp"] = "patch_engine",
+        args_schema: dict[str, Any],
+        returns_schema: dict[str, Any],
+        side_effects: list[str],
+        approval_required: bool,
+        availability: str = "available",
+        notes: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "tool_id": tool_id,
+            "backend": backend,
+            "args_schema": args_schema,
+            "returns_schema": returns_schema,
+            "side_effects": side_effects,
+            "approval_required": approval_required,
+            "availability": availability,
+            "notes": notes,
+        }
+
+    tools: list[dict[str, Any]] = [
+        # Aliases: underscore-style tool ids (used by some test prompts)
+        tool(
+            "dev_tree",
+            args_schema={"type": "object", "properties": {"root": {"type": "string"}, "depth": {"type": "integer"}, "max": {"type": "integer"}}},
+            returns_schema={"type": "object"},
+            side_effects=["disk_read"],
+            approval_required=False,
+            notes="Alias for dev.tree (GET /api/dev/tree)",
+        ),
+        tool(
+            "dev_file",
+            args_schema={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+            returns_schema={"type": "object"},
+            side_effects=["disk_read"],
+            approval_required=False,
+            notes="Alias for dev.file.read (GET /api/dev/file)",
+        ),
+        tool(
+            "git_info",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object"},
+            side_effects=["disk_read", "subprocess"],
+            approval_required=False,
+            notes="Alias for dev.git.info (GET /api/dev/git/info)",
+        ),
+        tool(
+            "introspection_run",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object"},
+            side_effects=["disk_read", "subprocess", "network"],
+            approval_required=False,
+            notes="Alias for dev.introspection.run (GET/POST /api/dev/introspection/run)",
+        ),
+        tool(
+            "saw_agent_health",
+            backend="saw_api",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object"},
+            side_effects=["network"],
+            approval_required=False,
+            notes="GET /api/saw/agent/health (proxied to SAW API /agent/health)",
+        ),
+
+        tool(
+            "dev.tree",
+            args_schema={"type": "object", "properties": {"root": {"type": "string"}, "depth": {"type": "integer"}, "max": {"type": "integer"}}},
+            returns_schema={"type": "object", "properties": {"root": {"type": "string"}, "depth": {"type": "integer"}, "tree": {"type": "object"}, "truncated": {"type": "boolean"}}},
+            side_effects=["disk_read"],
+            approval_required=False,
+            notes="GET /api/dev/tree",
+        ),
+        tool(
+            "dev.file.read",
+            args_schema={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+            returns_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                    "bytes": {"type": ["integer", "null"]},
+                    "sha256": {"type": ["string", "null"]},
+                    "head_40_lines": {"type": "string"},
+                    "error": {"type": ["object", "null"]},
+                },
+            },
+            side_effects=["disk_read"],
+            approval_required=False,
+            notes="GET /api/dev/file",
+        ),
+        tool(
+            "dev.caps.get",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object"},
+            side_effects=["disk_read"],
+            approval_required=False,
+            notes="GET /api/dev/caps",
+        ),
+        tool(
+            "dev.caps.set",
+            args_schema={"type": "object", "properties": {"path": {"type": "string"}, "caps": {"type": "object"}}, "required": ["path", "caps"]},
+            returns_schema={"type": "object"},
+            side_effects=["disk_write"],
+            approval_required=False,
+            notes="POST /api/dev/caps",
+        ),
+        tool(
+            "dev.caps.validate",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object", "properties": {"ok": {"type": "boolean"}, "conflicts": {"type": "array"}}},
+            side_effects=["disk_read"],
+            approval_required=False,
+            notes="GET /api/dev/caps/validate",
+        ),
+        tool(
+            "dev.safe.write",
+            args_schema={"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
+            returns_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            side_effects=["disk_write", "subprocess"],
+            approval_required=True,
+            notes="POST /api/dev/safe/write (approval-gated; may run validation + git subprocess)",
+        ),
+        tool(
+            "dev.safe.delete",
+            args_schema={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+            returns_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            side_effects=["disk_write", "subprocess"],
+            approval_required=True,
+            notes="POST /api/dev/safe/delete (approval-gated; may run validation + git subprocess)",
+        ),
+        tool(
+            "dev.safe.applyPatch",
+            args_schema={"type": "object", "properties": {"patch": {"type": "string"}}, "required": ["patch"]},
+            returns_schema={"type": "object", "properties": {"ok": {"type": "boolean"}, "touched": {"type": "array"}}},
+            side_effects=["disk_write", "subprocess"],
+            approval_required=True,
+            notes="POST /api/dev/safe/applyPatch (approval-gated; may run validation + git subprocess)",
+        ),
+        tool(
+            "dev.git.info",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object", "properties": {"repo_root": {"type": "string"}, "head": {"type": "string"}}},
+            side_effects=["disk_read", "subprocess"],
+            approval_required=False,
+            notes="GET /api/dev/git/info",
+        ),
+        tool(
+            "dev.git.status",
+            args_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+            returns_schema={"type": "object"},
+            side_effects=["disk_read", "subprocess"],
+            approval_required=False,
+            notes="GET /api/dev/git/status",
+        ),
+        tool(
+            "dev.tools.list",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object", "properties": {"tools": {"type": "array"}}},
+            side_effects=["disk_read"],
+            approval_required=False,
+            notes="GET /api/dev/tools/list",
+        ),
+        tool(
+            "dev.introspection.run",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object"},
+            side_effects=["disk_read", "subprocess", "network"],
+            approval_required=False,
+            notes="GET/POST /api/dev/introspection/run",
+        ),
+        tool(
+            "dev.git.commit",
+            args_schema={"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]},
+            returns_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+            side_effects=["subprocess", "disk_write"],
+            approval_required=True,
+            notes="POST /api/dev/git/commit (mutates repo)",
+        ),
+        tool(
+            "dev.term",
+            args_schema={"type": "object", "properties": {}},
+            returns_schema={"type": "object"},
+            side_effects=["subprocess"],
+            approval_required=True,
+            availability="available" if terminal_available else "unavailable",
+            notes="/api/dev/term/* (availability gated by SAW_ENABLE_TERMINAL)",
+        ),
+    ]
+
+    return {"tools": tools}
 
 
 @app.post("/api/dev/git/commit")

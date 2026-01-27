@@ -10,6 +10,18 @@ from pydantic import ValidationError
 from .patch_engine_client import pe_get, pe_post
 
 from ..plugins_runtime import PluginManifest
+from ..settings import get_settings
+from .health_state import get_last_agent_error
+
+try:
+    from .copilot_agent import copilot_enabled  # type: ignore
+
+    _COPILOT_AVAILABLE = True
+except Exception:
+    _COPILOT_AVAILABLE = False
+
+    def copilot_enabled() -> bool:  # type: ignore
+        return False
 
 TODO_PATH = "saw-workspace/todo.md"
 AGENT_WORKSPACE_PATH = "saw-workspace/agent/agent_workspace.md"
@@ -26,6 +38,33 @@ def tool_dev_file(path: str) -> dict[str, Any]:
 def tool_git_status(path: str | None = None) -> dict[str, Any]:
     q = {"path": path} if path else {}
     return pe_get("/api/dev/git/status", q)
+
+
+def tool_git_info() -> dict[str, Any]:
+    return pe_get("/api/dev/git/info", {})
+
+
+def tool_tools_list() -> dict[str, Any]:
+    return pe_get("/api/dev/tools/list", {})
+
+
+def tool_introspection_run() -> dict[str, Any]:
+    return pe_get("/api/dev/introspection/run", {})
+
+
+def tool_saw_agent_health() -> dict[str, Any]:
+    # Mirror SAW API /agent/health without requiring HTTP.
+    settings = get_settings()
+    llm_available = bool(settings.openai_api_key) or bool(copilot_enabled())
+    agent_chat_route_ok = True
+    last_error = get_last_agent_error()
+    if not llm_available and not last_error:
+        last_error = "llm_not_configured"
+    return {
+        "llm_available": bool(llm_available),
+        "agent_chat_route_ok": bool(agent_chat_route_ok),
+        "last_error": str(last_error or ""),
+    }
 
 
 def tool_set_caps(path: str, r: bool, w: bool, d: bool) -> dict[str, Any]:
@@ -64,7 +103,18 @@ def tool_write_agent_workspace(content: str) -> dict[str, Any]:
     return tool_safe_write(AGENT_WORKSPACE_PATH, content)
 
 
-READ_TOOLS = {"dev_tree", "dev_file", "git_status", "get_todo", "get_agent_workspace", "validate_plugin_manifest"}
+READ_TOOLS = {
+    "dev_tree",
+    "dev_file",
+    "git_status",
+    "git_info",
+    "tools_list",
+    "introspection_run",
+    "saw_agent_health",
+    "get_todo",
+    "get_agent_workspace",
+    "validate_plugin_manifest",
+}
 WRITE_TOOLS = {
     "apply_patch",
     "git_commit",
@@ -163,6 +213,38 @@ TOOLS: list[dict[str, Any]] = [
                 "required": [],
                 "additionalProperties": False,
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_info",
+            "description": "Read-only git info for attestations (dev-only).",
+            "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tools_list",
+            "description": "List Patch Engine tool catalog (dev-only).",
+            "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "introspection_run",
+            "description": "Run the deterministic attestation/introspection packet generator (dev-only).",
+            "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "saw_agent_health",
+            "description": "Check SAW agent health (no network).",
+            "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         },
     },
     {
@@ -376,6 +458,14 @@ def run_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "git_status":
         p = args.get("path")
         return tool_git_status(path=str(p) if isinstance(p, str) and p.strip() else None)
+    if name == "git_info":
+        return tool_git_info()
+    if name == "tools_list":
+        return tool_tools_list()
+    if name == "introspection_run":
+        return tool_introspection_run()
+    if name == "saw_agent_health":
+        return tool_saw_agent_health()
     if name == "get_todo":
         return tool_get_todo()
     if name == "get_agent_workspace":

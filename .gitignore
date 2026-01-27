@@ -34,3 +34,8 @@ macos-keychain.pem
 
 # Copilot TLS bundles (generated locally)
 saw-workspace/certs/*.pem
+
+# Attestation / introspection runtime outputs (keep docs stable, avoid noisy diffs)
+saw-workspace/introspection_docs/*.yaml
+saw-workspace/introspection_docs/*.yml
+!saw-workspace/introspection_docs/README.md

@@ -1,5 +1,9 @@
 # Scientific AI Workstation (SAW) — Frontend MVP
 
+<p align="center">
+  <img src="assets/cosmo-saw.png" alt="Cosmo Saw" width="280" />
+</p>
+
 Desktop-style UI (Ableton-for-science vibe) to assemble pipelines from plugins, inspect nodes, and use AI-assisted debugging/editing.
 
 **What this is:** a local-first dev environment (frontend + API + Patch Engine) where an agent can propose file changes, and you explicitly approve any writes.
@@ -40,7 +44,10 @@ In practice this means:
   - `src/ai/client.ts`: calls `/api/saw/agent/chat` + `/api/saw/agent/approve`
   - `src/store/useSawStore.ts`: UI state + “Approve + run” wiring
   - `src/components/TodoPanel.tsx`: reads (and will edit) the todo markdown
-- **SAW API (agent + tool loop)**: `services/saw_api/app/agent.py` (will be refactored into a package)
+- **SAW API (agent + tool loop)**
+  - `services/saw_api/app/agent_runtime/core.py`: agent loop
+  - `services/saw_api/app/agent_runtime/tools.py`: tool definitions + dispatcher
+  - `services/saw_api/app/main.py`: API routes
 - **Patch Engine (safe file ops + caps)**: `services/patch_engine/app/main.py`
 - **Workspace docs**
   - `saw-workspace/todo.md`: human + agent task tracking
@@ -51,7 +58,7 @@ In practice this means:
 ### Prerequisites
 
 - Node.js (recommended: current LTS)
-- Python 3.11+ (for the SAW API)
+- Python 3.11+ (for the SAW API; currently expected to be <= 3.13)
 - Docker (for Postgres + pgvector if you enable DB features)
 - (Optional, for Copilot provider) GitHub Copilot CLI (`copilot`) authenticated on this machine
 
@@ -76,6 +83,14 @@ npm run dev
 - SAW API (uvicorn): `http://127.0.0.1:5127/` (in the recommended script below)
 - Postgres (docker compose): `127.0.0.1:54329`
 
+### Runtime attestation (API surface probe)
+
+The Patch Engine exposes a runtime introspection endpoint used by the Developer panel:
+
+- `GET /api/dev/introspection/run`
+
+This produces a machine-readable packet describing tool surface + git state + embedded probes.
+
 ## Package Index
 
 ### Initial Install
@@ -84,9 +99,14 @@ npm run dev
 
 Starts: Postgres (pgvector) + SAW API + frontend.
 
-**Linux/macOS:**
+**macOS:**
 ```bash
 ./scripts/dev_all_mac.sh --frontend-port 7176 --api-port 5127
+```
+
+**Linux:**
+```bash
+./scripts/dev_all_linux.sh --frontend-port 7176 --api-port 5127
 ```
 
 Notes:

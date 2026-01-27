@@ -1,0 +1,18 @@
+{
+  "schema_version": "attestation.probes.v1",
+  "notes": "Default probes for /api/dev/introspection/run.",
+  "dev_tree": [
+    { "root": ".", "depth": 3, "max": 4000 },
+    { "root": "saw-workspace/machine-context", "depth": 4, "max": 4000 }
+  ],
+  "dev_file": [
+    { "path": ".saw/caps.json" },
+    { "path": ".github/copilot-instructions.md" },
+    { "path": "saw-workspace/machine-context/START_HERE.md" }
+  ],
+  "tools": [
+    { "endpoint": "/api/dev/tools/list" },
+    { "endpoint": "/api/dev/git/info" },
+    { "endpoint": "/api/saw/agent/health" }
+  ]
+}

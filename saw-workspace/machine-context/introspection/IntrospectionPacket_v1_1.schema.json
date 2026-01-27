@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "saw://machine-context/introspection/IntrospectionPacket_v1_1.schema.json",
+  "title": "IntrospectionPacket_v1_1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "timestamp_utc", "evidence"],
+  "properties": {
+    "schema_version": { "const": "1.1" },
+    "timestamp_utc": { "type": "string", "format": "date-time" },
+
+    "agent_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "agent_kind", "version", "build_hash"],
+      "properties": {
+        "name": { "$ref": "#/$defs/ClaimString" },
+        "agent_kind": { "$ref": "#/$defs/ClaimString" },
+        "version": { "$ref": "#/$defs/ClaimString" },
+        "build_hash": { "$ref": "#/$defs/ClaimString" }
+      }
+    },
+
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cwd", "repo_root", "workspace_root_guess"],
+      "properties": {
+        "cwd": { "$ref": "#/$defs/ClaimString" },
+        "repo_root": { "$ref": "#/$defs/ClaimString" },
+        "workspace_root_guess": { "$ref": "#/$defs/ClaimString" }
+      }
+    },
+
+    "git_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "branch", "is_dirty", "status_porcelain"],
+      "properties": {
+        "head": { "$ref": "#/$defs/ClaimString" },
+        "branch": { "$ref": "#/$defs/ClaimString" },
+        "is_dirty": { "$ref": "#/$defs/ClaimBooleanOrUnknown" },
+        "status_porcelain": { "$ref": "#/$defs/ClaimString" }
+      }
+    },
+
+    "capabilities": { "type": "object" },
+    "policies_claimed": { "type": "object" },
+
+    "tool_surface": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ToolDescriptor" }
+    },
+
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["llm_available", "agent_chat_route_ok", "last_error"],
+      "properties": {
+        "llm_available": { "$ref": "#/$defs/ClaimBooleanOrUnknown" },
+        "agent_chat_route_ok": { "$ref": "#/$defs/ClaimBooleanOrUnknown" },
+        "last_error": { "$ref": "#/$defs/ClaimString" }
+      }
+    },
+
+    "evidence": {
+      "type": "array",
+      "minItems": 0,
+      "items": { "$ref": "#/$defs/EvidenceItem" }
+    },
+
+    "notes": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+
+  "$defs": {
+    "ClaimBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "status", "evidence_ref"],
+      "properties": {
+        "value": {},
+        "status": { "enum": ["proven", "unproven"] },
+        "evidence_ref": {
+          "description": "Indices into the top-level evidence array.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+
+    "ClaimString": {
+      "allOf": [
+        { "$ref": "#/$defs/ClaimBase" },
+        { "properties": { "value": { "type": "string" } } }
+      ]
+    },
+
+    "ClaimBooleanOrUnknown": {
+      "allOf": [
+        { "$ref": "#/$defs/ClaimBase" },
+        { "properties": { "value": { "anyOf": [ { "type": "boolean" }, { "const": "unknown" } ] } } }
+      ]
+    },
+
+    "ToolDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_id",
+        "backend",
+        "args_schema",
+        "returns_schema",
+        "side_effects",
+        "approval_required",
+        "availability",
+        "notes"
+      ],
+      "properties": {
+        "tool_id": { "type": "string" },
+        "backend": { "enum": ["saw_api", "patch_engine", "mcp"] },
+        "args_schema": { "type": "object" },
+        "returns_schema": { "type": "object" },
+        "side_effects": {
+          "type": "array",
+          "items": { "enum": ["disk_read", "disk_write", "network", "subprocess"] }
+        },
+        "approval_required": { "type": "boolean" },
+        "availability": { "enum": ["available", "unavailable"] },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "EvidenceItem": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["tool_call", "file_read", "shell_command"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "file_read" } } },
+          "then": {
+            "additionalProperties": false,
+            "required": ["kind", "path"],
+            "properties": {
+              "kind": { "const": "file_read" },
+              "path": { "type": "string" },
+              "bytes": { "type": ["integer", "null"], "minimum": 0 },
+              "sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+              "head_40_lines": { "type": "string" },
+              "error": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "required": ["code", "message"],
+                "properties": {
+                  "code": { "type": "string" },
+                  "message": { "type": "string" },
+                  "detail": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "tool_call" } } },
+          "then": {
+            "additionalProperties": true,
+            "required": ["kind", "tool_id"],
+            "properties": {
+              "kind": { "const": "tool_call" },
+              "tool_id": { "type": "string" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "shell_command" } } },
+          "then": {
+            "additionalProperties": true,
+            "required": ["kind", "cmd"],
+            "properties": {
+              "kind": { "const": "shell_command" },
+              "cmd": { "type": "string" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

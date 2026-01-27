@@ -11,9 +11,32 @@ from ..settings import get_settings
 from .prompt import system_prompt
 from .state import PendingToolCall, get_conv, now_ms
 from .tools import READ_TOOLS, TOOLS, WRITE_TOOLS, run_tool
+from .health_state import set_last_agent_error
 
 
 AgentStatus = Literal["ok", "needs_approval", "error"]
+
+
+def _sanitize_tool_args(args: dict[str, Any] | None) -> dict[str, Any]:
+    """Prevent logs from capturing large or sensitive payloads.
+
+    We do not log model 'thoughts'. We only log executed actions and their parameters,
+    with large fields summarized.
+    """
+
+    a = dict(args or {})
+    for k in ("content", "patch"):
+        if k in a and isinstance(a.get(k), str):
+            s = a.get(k) or ""
+            # Minimal, deterministic summary.
+            a[k] = {"len": len(s)}
+    # Bound any long strings.
+    for k, v in list(a.items()):
+        if isinstance(v, str) and len(v) > 500:
+            a[k] = v[:500] + f"\n... (truncated, {len(v)} chars total)"
+    return a
+
+
 
 
 def _looks_like_plugin_creation_request(text: str) -> bool:
@@ -86,6 +109,7 @@ def agent_model() -> str:
 def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
     settings = get_settings()
     if not settings.openai_api_key:
+        set_last_agent_error("OPENAI_API_KEY missing")
         return {"status": "error", "error": "OPENAI_API_KEY missing", "conversation_id": conversation_id}
 
     st = get_conv(conversation_id)
@@ -269,12 +293,14 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
 
     st.updated_at_ms = now_ms()
     append_agent_event(settings, {"type": "agent.error", "conversation_id": st.id, "error": "tool_loop_exceeded"})
+    set_last_agent_error("tool_loop_exceeded")
     return {"status": "error", "error": "tool_loop_exceeded", "conversation_id": st.id}
 
 
 def agent_approve(*, conversation_id: str, tool_call_id: str, approved: bool) -> dict[str, Any]:
     settings = get_settings()
     if not settings.openai_api_key:
+        set_last_agent_error("OPENAI_API_KEY missing")
         return {"status": "error", "error": "OPENAI_API_KEY missing", "conversation_id": conversation_id}
 
     st = get_conv(conversation_id)
@@ -288,7 +314,7 @@ def agent_approve(*, conversation_id: str, tool_call_id: str, approved: bool) ->
         {
             "type": "agent.approve.request",
             "conversation_id": st.id,
-            "tool": {"id": pending.id, "name": pending.name, "arguments": pending.arguments},
+            "tool": {"id": pending.id, "name": pending.name, "arguments": _sanitize_tool_args(pending.arguments)},
             "approved": bool(approved),
         },
     )
@@ -347,5 +373,7 @@ def agent_approve(*, conversation_id: str, tool_call_id: str, approved: bool) ->
         },
     )
     return {"status": "ok", "conversation_id": st.id, "message": content, "model": model}
+
+
 
 

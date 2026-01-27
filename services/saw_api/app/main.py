@@ -26,6 +26,7 @@ from .settings import get_settings
 from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
 from .agent import agent_chat, agent_approve
+from .agent_runtime.health_state import get_last_agent_error
 
 try:
     from .agent_runtime.copilot_agent import copilot_enabled, copilot_manager
@@ -149,6 +150,27 @@ class AgentApproveRequest(BaseModel):
     conversation_id: str
     tool_call_id: str
     approved: bool
+
+
+class AgentHealthResponse(BaseModel):
+    llm_available: bool
+    agent_chat_route_ok: bool
+    last_error: str
+
+
+@app.get("/agent/health", response_model=AgentHealthResponse)
+def agent_health() -> AgentHealthResponse:
+    # Cheap checks only: no network calls to OpenAI.
+    llm_available = bool(settings.openai_api_key) or bool(copilot_enabled())
+    agent_chat_route_ok = callable(agent_chat)
+    last_error = get_last_agent_error()
+    if not llm_available and not last_error:
+        last_error = "llm_not_configured"
+    return AgentHealthResponse(
+        llm_available=llm_available,
+        agent_chat_route_ok=agent_chat_route_ok,
+        last_error=str(last_error or ""),
+    )
 
 
 @app.post("/agent/chat")

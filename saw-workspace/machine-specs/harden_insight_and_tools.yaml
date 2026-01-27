@@ -1,0 +1,251 @@
+saw_vs_code_agent_prompt:
+  spec_version: "0.1"
+  name: "Harden agent introspection attestation + bring repo to consistent state"
+  goal:
+    - Make the agent’s introspection output audit-grade (machine-validated, evidence-backed, no ambiguous booleans).
+    - Ensure SAW has a deterministic context entrypoint and a consistent tool/evidence model.
+    - Reduce future technical debt by formalizing the agent↔system contract (capabilities, tools, approvals, probes, rollback).
+
+  observed_from_latest_packet_2026_01_27:
+    positives:
+      - "Uses schema v1.1 with {value,status,evidence_ref} pattern."
+      - "Evidence kinds include tool_call and file_read; references are consistent."
+      - "caps.json and copilot-instructions.md are discoverable and readable."
+      - "START_HERE.md now exists in machine-context (dev_tree proves presence)."
+    issues_to_fix:
+      - id: "EVIDENCE_SHA256_UNKNOWN"
+        problem: "file_read entries show sha256: 'unknown' and START_HERE head_40_lines is empty."
+        impact: "Cannot validate file content deterministically or detect drift."
+      - id: "HEALTH_BOOLEAN_UNPROVEN"
+        problem: "health fields are 'unknown' without an explicit probe tool/endpoint."
+        impact: "Attestation cannot reliably tell if chat route or LLM path is working."
+      - id: "IDENTITY_RUNTIME_UNPROVEN"
+        problem: "agent_identity and runtime are unproven with no evidence references."
+        impact: "Session metadata cannot be trusted programmatically."
+      - id: "CAPS_RULE_AMBIGUITY"
+        problem: "caps show overlapping rules ('.' writable + './' not writable)."
+        impact: "Inconsistent policy interpretation; future bugs and surprising writes."
+      - id: "TOOL_CATALOG_INCOMPLETE"
+        problem: "tool_surface lists only probed tools; no authoritative tool registry/list endpoint."
+        impact: "Chat-to-tool discoverability is not verifiable."
+
+  non_negotiables:
+    output_format:
+      - "All new/updated introspection packets MUST be YAML-only, no prose."
+      - "No boolean health field may be set true/false unless backed by evidence."
+      - "Every claim must be tagged proven|unproven and reference evidence indices."
+    safety:
+      - "No destructive operations; all writes approval-gated via Patch Engine."
+      - "Sensitive paths remain denied: .env, .git, node_modules, dist (unless explicitly granted)."
+      - "New git subprocess tools, if added, must be read-only and declared with side effects."
+
+  required_deliverables:
+    - id: "D1_INTROSPECTION_SCHEMA"
+      description: "Formal schema and validator for IntrospectionPacket_v1_1"
+      files:
+        add_or_update:
+          - "saw-workspace/machine-context/introspection/IntrospectionPacket_v1_1.schema.json"
+          - "services/patch_engine/app/models/introspection.py"
+          - "services/saw_api/app/models/introspection.py"
+          - "src/ai/introspectionSchema.ts"
+      acceptance:
+        - "Schema validates the current packet structure: {value,status,evidence_ref} per claim and evidence array."
+        - "Frontend and backend both validate packet payloads; invalid packets are rejected with structured errors."
+
+    - id: "D2_PATCH_ENGINE_EVIDENCE_UPGRADES"
+      description: "Make evidence entries deterministic (sha256, bytes, head lines, structured errors)"
+      files:
+        add_or_update:
+          - "services/patch_engine/app/tools/dev_file.py"
+          - "services/patch_engine/app/tools/dev_tree.py"
+          - "services/patch_engine/app/main.py"
+          - "services/patch_engine/app/routers/dev.py"
+      implementation_notes:
+        dev_file:
+          - "Return: {path, bytes, sha256, head_40_lines, error:{code,message,detail}}"
+          - "Compute sha256 over raw file bytes."
+          - "head_40_lines must be first 40 lines (or fewer) with newline preservation."
+          - "On error, populate error.code (e.g., NOT_FOUND, PERMISSION_DENIED, TOO_LARGE, DECODE_ERROR) and include message."
+        dev_tree:
+          - "Return: {root, depth, tree, truncated:boolean, error:{...}}"
+          - "Stable ordering of children (dirs then files, alphabetical)."
+          - "If truncated, provide counts or a hint for pagination."
+      acceptance:
+        - "file_read evidence no longer has sha256:'unknown' when file is readable."
+        - "START_HERE.md head_40_lines is non-empty (unless file is truly empty) and includes at least the title line."
+        - "Tool errors always include structured error object."
+
+    - id: "D3_AUTHORITATIVE_TOOL_CATALOG"
+      description: "Expose a canonical tool registry endpoint with side effects + approval requirements"
+      files:
+        add_or_update:
+          - "services/patch_engine/app/tools/registry.py"
+          - "services/patch_engine/app/routers/tools.py"
+          - "services/patch_engine/app/main.py"
+          - "saw-workspace/machine-context/tools/TOOL_CATALOG.md"
+      tool_registry_contract:
+        endpoint: "/api/dev/tools/list"
+        response_shape:
+          tools:
+            - tool_id: "string"
+              backend: "saw_api|patch_engine|mcp"
+              args_schema: "object"
+              returns_schema: "object"
+              side_effects: ["disk_read","disk_write","network","subprocess"]
+              approval_required: true
+              availability: "available|unavailable"
+              notes: "string"
+      acceptance:
+        - "Agent can call a single endpoint to list all tools and metadata."
+        - "tool_surface in introspection packet can be generated from this endpoint (not manual/probed-only)."
+
+    - id: "D4_GIT_INFO_WITHOUT_SHELL"
+      description: "Provide git HEAD/branch/dirty/status via a safe tool (no direct .git file reads required)"
+      files:
+        add_or_update:
+          - "services/patch_engine/app/tools/git_info.py"
+          - "services/patch_engine/app/routers/git.py"
+          - "services/patch_engine/app/tools/registry.py"
+      contract:
+        endpoint: "/api/dev/git/info"
+        side_effects: ["subprocess","disk_read"]
+        approval_required: false
+        returns:
+          repo_root: "string"
+          head: "string"
+          branch: "string"
+          is_dirty: "boolean"
+          status_porcelain: "string"
+      acceptance:
+        - "Introspection can mark git_state.head/branch proven with evidence via this tool."
+        - "Tool is read-only and documented in TOOL_CATALOG."
+
+    - id: "D5_HEALTH_PROBES_FOR_AGENT_CHAT"
+      description: "Add explicit probe endpoints so health fields can be proven"
+      files:
+        add_or_update:
+          - "services/saw_api/app/routers/agent_health.py"
+          - "services/saw_api/app/main.py"
+          - "services/patch_engine/app/tools/http_probe.py"
+          - "services/patch_engine/app/tools/registry.py"
+      contracts:
+        saw_api_endpoint: "/api/saw/agent/health"
+        saw_api_response:
+          llm_available: "boolean"
+          agent_chat_route_ok: "boolean"
+          last_error: "string"
+        patch_engine_probe_tool:
+          endpoint: "/api/dev/http/probe"
+          args:
+            method: "GET|POST"
+            url: "string"
+            timeout_ms: 2500
+          returns:
+            ok: "boolean"
+            status_code: "int|null"
+            error: "object|null"
+      acceptance:
+        - "health.llm_available and health.agent_chat_route_ok can be proven (not 'unknown') when the system is up."
+        - "If probe cannot run, packet must set health values to 'unknown' with unproven status."
+
+    - id: "D6_CAPS_CANONICALIZATION_AND_PRECEDENCE"
+      description: "Remove ambiguity in caps rules and document precedence"
+      files:
+        add_or_update:
+          - "services/patch_engine/app/security/caps.py"
+          - ".saw/caps.json"
+          - "saw-workspace/machine-context/security/CAPS_RULES.md"
+      required_behavior:
+        - "Normalize paths (no duplicate '.' vs './')."
+        - "Define precedence rule: longest matching prefix wins; if equal length, last rule wins (or explicitly chosen)."
+        - "Ship a small validator that flags overlapping/conflicting rules."
+      acceptance:
+        - "caps.json no longer contains both '.' and './' rules with conflicting permissions."
+        - "Evaluator behavior is deterministic and documented."
+
+    - id: "D7_ONE_BUTTON_ATTESTATION"
+      description: "Provide a single endpoint to generate the full introspection packet with standard probes"
+      files:
+        add_or_update:
+          - "services/patch_engine/app/routers/introspection.py"
+          - "services/patch_engine/app/tools/introspection_runner.py"
+          - "services/patch_engine/app/tools/registry.py"
+          - "src/ai/introspectionClient.ts"
+          - "src/components/AgentStatusPanel.tsx"
+      contract:
+        endpoint: "/api/dev/introspection/run"
+        returns: "IntrospectionPacket_v1_1"
+        behavior:
+          - "Runs standard probes: dev_tree repo root + machine-context, dev_file caps + copilot-instructions + START_HERE, tools/list, git/info, saw agent health probe."
+          - "Writes a copy to saw-workspace/introspection_docs/packet_<timestamp>.yaml (approval-gated)."
+      acceptance:
+        - "User can click 'Run Attestation' in UI and see a validated packet."
+        - "Packet is saved to saw-workspace/introspection_docs/ with deterministic naming."
+        - "Optionally add saw-workspace/introspection_docs/ to .gitignore to avoid noise."
+
+    - id: "D8_DOCS_CONTEXT_ENTRYPOINT_CONSISTENCY"
+      description: "Make START_HERE.md canonical and complete; remove drift across docs"
+      files:
+        add_or_update:
+          - "saw-workspace/machine-context/START_HERE.md"
+          - "saw-workspace/machine-context/introspection/README.md"
+          - ".github/copilot-instructions.md"
+      required_content:
+        START_HERE_md:
+          - "Defines: where context lives, how to run attestation, where tool catalog is, and the agent contract."
+          - "Links to introspection schema + tool catalog + caps rules doc."
+        copilot_instructions_md:
+          - "References /api/dev/introspection/run as the preferred first step."
+      acceptance:
+        - "Agent can read START_HERE.md and immediately know the deterministic workflow."
+
+  repo_consistency_actions:
+    git_hygiene:
+      - "Ensure saw-workspace/introspection_docs/ exists with a README.md explaining contents."
+      - "Decide whether to track or ignore introspection outputs; recommended: add to .gitignore, keep only README.md tracked."
+    current_dirty_state_note:
+      - "There are modified frontend files and new LeftSidebar/FileBrowser components; ensure they compile and match intended layout."
+      - "Do not mix introspection changes with unrelated UI refactors in a single patch; keep PRs narrow."
+
+  testing_requirements:
+    unit_tests:
+      - id: "T1_SHA256"
+        location: "services/patch_engine/tests/test_dev_file_sha256.py"
+        asserts:
+          - "sha256 matches known value for a fixture file."
+      - id: "T2_CAPS_PRECEDENCE"
+        location: "services/patch_engine/tests/test_caps_precedence.py"
+        asserts:
+          - "longest-prefix precedence works and conflicts are detected."
+    integration_tests:
+      - id: "T3_INTROSPECTION_RUN"
+        location: "services/patch_engine/tests/test_introspection_run.py"
+        asserts:
+          - "/api/dev/introspection/run returns schema-valid packet."
+          - "Evidence includes tool_call/file_read entries with non-unknown sha256 where readable."
+      - id: "T4_TOOL_LIST"
+        location: "services/patch_engine/tests/test_tools_list.py"
+        asserts:
+          - "/api/dev/tools/list includes expected tools with approval + side effects metadata."
+
+  execution_instructions_for_vs_code_agent:
+    constraints:
+      - "Use patch-based edits only; no direct unreviewed writes."
+      - "Keep changes grouped by deliverable; prefer multiple small commits."
+      - "Update docs alongside code in the same deliverable."
+    workflow:
+      - "1) Implement D2 (dev_file/dev_tree) first (foundation)."
+      - "2) Implement D3 (tools/list) and register existing tools."
+      - "3) Implement D4 (git/info) and D5 (health probes)."
+      - "4) Implement D6 (caps canonicalization)."
+      - "5) Implement D7 (introspection/run) and UI button/panel."
+      - "6) Implement D1 (schema validators) and tests (T1-T4)."
+      - "7) Finish with D8 docs alignment."
+
+  acceptance_definition_of_done:
+    - "Running /api/dev/introspection/run produces an IntrospectionPacket_v1_1 with >80% fields proven in a healthy dev environment."
+    - "All health booleans are either proven or explicitly 'unknown' with unproven status."
+    - "All file_read evidence has sha256 + bytes when readable; errors are structured when not."
+    - "Tool catalog is authoritative and used to populate tool_surface."
+    - "Caps behavior is deterministic; overlapping '.'/'./' ambiguity removed."
+    - "Tests pass; docs point to the new attestation workflow."

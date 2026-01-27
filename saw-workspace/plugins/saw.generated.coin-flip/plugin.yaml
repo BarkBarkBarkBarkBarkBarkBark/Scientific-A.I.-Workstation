@@ -1,0 +1,53 @@
+id: saw.generated.coin-flip
+name: Coin Flip
+version: 0.1.0
+description: Simulate flipping a biased coin one or more times (optionally seeded
+  for reproducibility).
+category_path: games
+entrypoint:
+  file: wrapper.py
+  callable: main
+environment:
+  python: '>=3.11,<3.13'
+  pip: []
+inputs: {}
+params:
+  num_flips:
+    type: number
+    default: 1
+    ui:
+      label: Number of flips
+    description: How many coin flips to simulate (min 1).
+  p_heads:
+    type: number
+    default: 0.5
+    ui:
+      label: Probability of heads (0-1)
+    description: Chance of Heads on each flip.
+  seed:
+    type: string
+    default: ''
+    ui:
+      label: Seed (optional)
+    description: If provided, results are deterministic for the same seed + settings.
+  return_labels:
+    type: string
+    default: HT
+    ui:
+      label: Output labels (HT or heads/tails)
+    description: 'Choose output format: ''HT'' -> [''H'',''T''], ''words'' -> [''heads'',''tails''].'
+outputs:
+  flips:
+    type: array
+  summary:
+    type: object
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: none
+  disk: read_only
+  subprocess: forbidden
+resources:
+  gpu: forbidden
+  threads: 1
