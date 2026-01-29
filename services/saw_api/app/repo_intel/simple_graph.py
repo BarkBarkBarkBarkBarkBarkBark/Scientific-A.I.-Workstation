@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import fnmatch
 import os
 import re
 import subprocess
@@ -76,6 +77,55 @@ def _git_list_files(repo_root: Path) -> list[str] | None:
     return files
 
 
+def _load_gitignore_globs(repo_root: Path) -> list[str]:
+    p = repo_root / ".gitignore"
+    if not p.is_file():
+        return []
+    out: list[str] = []
+    try:
+        for raw in p.read_text("utf-8", errors="ignore").splitlines():
+            s = raw.strip()
+            if not s or s.startswith("#"):
+                continue
+            # Negation is tricky to emulate correctly; ignore it in this fallback.
+            if s.startswith("!"):
+                continue
+            # Strip leading slash (anchor-to-root semantics are not replicated exactly).
+            if s.startswith("/"):
+                s = s[1:]
+            out.append(s)
+    except Exception:
+        return []
+    return out
+
+
+def _matches_gitignore(rel_posix: str, globs: list[str]) -> bool:
+    if not globs:
+        return False
+    rel_posix = rel_posix.lstrip("/")
+    base = rel_posix.rsplit("/", 1)[-1]
+    for pat in globs:
+        # Directory patterns: treat as prefix match.
+        if pat.endswith("/"):
+            prefix = pat.rstrip("/")
+            if rel_posix == prefix or rel_posix.startswith(prefix + "/"):
+                return True
+            continue
+
+        # If pattern contains a slash, match against full relative path.
+        if "/" in pat:
+            if fnmatch.fnmatch(rel_posix, pat):
+                return True
+            # Also try matching anywhere in the path for common patterns like "dist/*".
+            if fnmatch.fnmatch(rel_posix, f"**/{pat}"):
+                return True
+        else:
+            # No slash: match basenames anywhere.
+            if fnmatch.fnmatch(base, pat):
+                return True
+    return False
+
+
 def _iter_repo_files(cfg: SimpleGraphConfig) -> Iterator[Path]:
     scope_prefix = cfg.scope_prefix.strip().lstrip("/")
     git_files = _git_list_files(cfg.repo_root)
@@ -91,11 +141,25 @@ def _iter_repo_files(cfg: SimpleGraphConfig) -> Iterator[Path]:
             yield path
         return
 
+    gitignore_globs = _load_gitignore_globs(cfg.repo_root)
+
     for root, dirs, files in os.walk(cfg.repo_root):
-        dirs[:] = [d for d in dirs if d not in DEFAULT_EXCLUDES]
+        # Prune excluded dirs early.
+        kept_dirs: list[str] = []
+        for d in dirs:
+            if d in DEFAULT_EXCLUDES:
+                continue
+            rel_dir = (Path(root) / d).relative_to(cfg.repo_root).as_posix()
+            if _matches_gitignore(rel_dir + "/", gitignore_globs):
+                continue
+            kept_dirs.append(d)
+        dirs[:] = kept_dirs
+
         for name in files:
             path = Path(root) / name
             rel = path.relative_to(cfg.repo_root).as_posix()
+            if _matches_gitignore(rel, gitignore_globs):
+                continue
             if scope_prefix and not rel.startswith(scope_prefix):
                 continue
             if not cfg.include_tests and _is_test_path(path):

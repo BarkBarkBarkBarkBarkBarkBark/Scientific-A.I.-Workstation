@@ -21,7 +21,38 @@ environment:
     - httpx
     - jinja2
 inputs: {}
-params: {}
+params:
+  repo_root:
+    type: string
+    required: false
+    default: ""
+    description: "Repo root to scan (absolute or relative). Leave blank to use the workspace repo root."
+  include_python:
+    type: boolean
+    required: false
+    default: true
+  include_ts:
+    type: boolean
+    required: false
+    default: true
+  include_tests:
+    type: boolean
+    required: false
+    default: true
+  scope_prefix:
+    type: string
+    required: false
+    default: ""
+    description: "Optional path prefix (relative to repo_root) to limit scanning."
+  max_files:
+    type: integer
+    required: false
+    default: 6000
+  launch_viewer:
+    type: boolean
+    required: false
+    default: false
+    description: "When true, starts the viewer server and opens a browser window."
 outputs:
   status:
     type: "string"

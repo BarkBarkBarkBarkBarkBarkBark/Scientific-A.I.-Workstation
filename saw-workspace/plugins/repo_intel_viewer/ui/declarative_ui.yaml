@@ -2,7 +2,21 @@ declarative_ui_spec_version: "0.1"
 kind: "PluginModule"
 pluginId: "repo_intel_viewer"
 title: "Repo Intel Viewer"
-subtitle: "Launch standalone graph viewer"
+subtitle: "Scan repo imports and launch viewer"
+
+actions:
+  - id: launchViewer
+    kind: sequence
+    steps:
+      - id: setLaunchTrue
+        kind: state.updateNodeParam
+        input: { nodeId: "${node.id}", key: "launch_viewer", value: true }
+      - id: run
+        kind: actions.runPluginNode
+        input: { nodeId: "${node.id}" }
+      - id: setLaunchFalse
+        kind: state.updateNodeParam
+        input: { nodeId: "${node.id}", key: "launch_viewer", value: false }
 
 computed:
   url:
@@ -12,6 +26,16 @@ computed:
     op: gt
     args:
       - { op: len, args: ["${computed.url}"] }
+      - 0
+  nodeCount: "${node.data.runtime.exec.last.outputs.status.metadata.node_count}"
+  edgeCount: "${node.data.runtime.exec.last.outputs.status.metadata.edge_count}"
+  repoRoot:
+    op: trim
+    args: ["${node.data.runtime.exec.last.outputs.status.metadata.repo_root}"]
+  hasCounts:
+    op: gt
+    args:
+      - { op: len, args: ["${computed.nodeCount}"] }
       - 0
 
 view:
@@ -49,14 +73,14 @@ view:
                   - "Idle"
 
     - type: Panel
-      props: { title: "Launch" }
+      props: { title: "Run / Launch" }
       children:
         - type: Row
           props: { justify: spaceBetween, align: center }
           children:
             - type: Text
               props: { variant: muted }
-              text: "Starts the viewer on a free local port and opens it in your browser."
+              text: "Run scans and reports counts. Launch Viewer opens the interactive graph in a new browser window."
             - type: Button
               props:
                 label: "Launch Viewer"
@@ -65,8 +89,26 @@ view:
                   op: eq
                   args: ["${node.data.status}", running]
                 onClick:
-                  action: actions.runPluginNode
-                  event: { nodeId: "${node.id}" }
+                  action: launchViewer
+                  event: {}
+
+        - type: Text
+          props: { variant: muted }
+          text:
+            op: if
+            args:
+              - "${computed.hasCounts}"
+              - { op: concat, args: ["Last scan: ", "${computed.nodeCount}", " files, ", "${computed.edgeCount}", " edges"] }
+              - "Last scan: — (click Run)"
+
+        - type: Text
+          props: { variant: muted }
+          text:
+            op: if
+            args:
+              - { op: gt, args: [{ op: len, args: ["${computed.repoRoot}"] }, 0] }
+              - { op: concat, args: ["Repo root: ", "${computed.repoRoot}"] }
+              - "Repo root: —"
 
         - type: InlineError
           props:
@@ -91,5 +133,4 @@ view:
                 - "${computed.hasUrl}"
                 - "${computed.url}"
                 - "—"
-
     - type: NodeRunPanel
