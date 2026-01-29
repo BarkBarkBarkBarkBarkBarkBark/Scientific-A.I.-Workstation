@@ -209,6 +209,27 @@ uv pip install -r services/patch_engine/requirements.txt >/dev/null
 # Copilot TLS scoping
 # -------------------
 # On Linux, rely on system CA by default (requires `ca-certificates` installed).
+# Do NOT export NODE_OPTIONS / NODE_EXTRA_CA_CERTS globally here.
+# Instead, pass Copilot TLS settings to the SAW API, which forwards them ONLY
+# to the Copilot CLI subprocess when/if the Copilot provider is used.
+if [[ -z "${SAW_COPILOT_EXTRA_CA_CERTS:-}" ]]; then
+  # Prefer a minimal CA bundle if present; fall back to a system CA export.
+  if [[ -f "$ROOT_DIR/saw-workspace/certs/copilot-ca.pem" ]]; then
+    export SAW_COPILOT_EXTRA_CA_CERTS="$ROOT_DIR/saw-workspace/certs/copilot-ca.pem"
+  elif [[ -f "$ROOT_DIR/saw-workspace/certs/linux-ca-bundle.pem" ]]; then
+    export SAW_COPILOT_EXTRA_CA_CERTS="$ROOT_DIR/saw-workspace/certs/linux-ca-bundle.pem"
+  else
+    # No CA bundle present yet; generate a bundle automatically (Linux).
+    if [[ -f "$ROOT_DIR/scripts/sub/export_linux_keychains_certs_pem.sh" ]]; then
+      log "generating Linux system CA bundle for Copilot..."
+      bash "$ROOT_DIR/scripts/sub/export_linux_keychains_certs_pem.sh" "$ROOT_DIR/saw-workspace/certs/linux-ca-bundle.pem" >/dev/null || true
+      if [[ -f "$ROOT_DIR/saw-workspace/certs/linux-ca-bundle.pem" ]]; then
+        export SAW_COPILOT_EXTRA_CA_CERTS="$ROOT_DIR/saw-workspace/certs/linux-ca-bundle.pem"
+      fi
+    fi
+  fi
+fi
+
 export SAW_COPILOT_USE_SYSTEM_CA="${SAW_COPILOT_USE_SYSTEM_CA:-1}"
 
 # Model defaults

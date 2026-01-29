@@ -57,10 +57,13 @@ In practice this means:
 
 ### Prerequisites
 
-- Node.js (recommended: current LTS)
+- [Node.js](https://nodejs.org/en/download)
 - Python 3.11+ (for the SAW API; currently expected to be <= 3.13)
-- Docker (for Postgres + pgvector if you enable DB features)
-- (Optional, for Copilot provider) GitHub Copilot CLI (`copilot`) authenticated on this machine
+- [OpenAI API Key](https://platform.openai.com/docs/overview)
+- [Docker](https://docs.docker.com/get-started/get-docker/)
+- [UV](https://docs.astral.sh/uv/getting-started/installation/)
+- [GitHub Copilot CLI authenticated on this machine](https://cli.github.com)
+- [Github Copilot SDK, running in server mode](https://github.com/github/copilot-sdk?tab=readme-ov-file)
 
 If you don’t need the DB, you can still run the frontend + API without Docker.
 
@@ -119,6 +122,15 @@ Notes:
   (default range `4321..4360`) and points the SAW API at it via `SAW_COPILOT_CLI_URL`.
   This avoids Copilot server restarts and port conflicts during `uvicorn --reload`.
 - Copilot TLS settings are scoped to the Copilot CLI process (so Vite/Node isn’t affected).
+
+TLS / corporate CA notes (Copilot):
+- If Copilot CLI fails with certificate errors on **Linux**, generate a bundle from your system CA store:
+  `bash scripts/sub/export_linux_keychains_certs_pem.sh`
+  This writes `saw-workspace/certs/linux-ca-bundle.pem`. You can also force it via:
+  `export SAW_COPILOT_EXTRA_CA_CERTS="$PWD/saw-workspace/certs/linux-ca-bundle.pem"`
+- If Copilot CLI fails with certificate errors on **macOS**, generate a Keychain bundle:
+  `bash scripts/sub/export_macos_keychain_certs_pem.sh`
+  This writes `saw-workspace/certs/macos-keychain.pem`.
 
 Then open: `http://127.0.0.1:7176/`
 
@@ -290,6 +302,7 @@ See `ENV_SETUP.md`.
     ```
   - If you see: `unable to get issuer certificate`, it’s a TLS trust issue (often corporate SSL interception).
     SAW defaults to starting Copilot with `--use-system-ca`, but some environments still need an explicit CA bundle.
+    - [Please see the the github issue resolution](https://github.com/github/copilot-cli/issues/675)
   - Generate a PEM bundle from macOS keychains:
     ```bash
     bash scripts/sub/export_macos_keychain_certs_pem.sh

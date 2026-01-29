@@ -31,6 +31,7 @@ __pycache__/
 .cursor/debug.log
 
 macos-keychain.pem
+saw-workspace/certs/*
 
 # Copilot TLS bundles (generated locally)
 saw-workspace/certs/*.pem
