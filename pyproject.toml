@@ -145,6 +145,8 @@ dependencies = [
     "pip",
     "github-copilot-sdk",
     "vitest>=2.0",
+    "plotly>=6.5.2",
+    "streamlit>=1.53.1",
 ]
 
 [tool.uv.workspace]

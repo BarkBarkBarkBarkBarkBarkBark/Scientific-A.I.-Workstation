@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 import httpx
 import os
 import jinja2
+import StaticFiles
 
 app = FastAPI()
 
