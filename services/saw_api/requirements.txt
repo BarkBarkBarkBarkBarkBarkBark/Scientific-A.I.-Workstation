@@ -7,6 +7,7 @@ pydantic==2.10.4
 PyYAML==6.0.2
 openai==1.58.1
 github-copilot-sdk
+coverage==7.5.4
 pytest==8.3.4
 
 

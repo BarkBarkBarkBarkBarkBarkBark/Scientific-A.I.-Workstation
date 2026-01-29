@@ -1,0 +1,40 @@
+id: "repo_intel_viewer"
+name: "Repo Intel Viewer"
+version: "0.1.0"
+description: "Standalone repo graph and file index viewer with descriptions."
+category_path: "tools"
+meta:
+	human_description: "Browse and annotate repository file relationships and descriptions."
+	machine_description: "Visualizes repo file graph and allows editing per-file descriptions."
+	tags: ["repo", "graph", "viewer", "declarativeUi"]
+	docs:
+		readme: "README.md"
+		agent_context: "AGENT_CONTEXT.md"
+		declarative_ui_ui: "ui/declarative_ui.yaml"
+entrypoint:
+	file: "wrapper.py"
+	callable: "main"
+environment:
+	python: ">=3.11,<3.13"
+	pip: []
+inputs:
+	in_obj:
+		type: "object"
+		ui: { label: "Input object (optional)" }
+	in_path:
+		type: "path"
+		ui: { label: "Workspace-relative path (optional)" }
+params:
+	message:
+		type: "string"
+		default: "Hello from repo_intel_viewer"
+		ui: { label: "Message" }
+	preview_bytes:
+		type: "number"
+		default: 256
+		ui: { label: "File preview bytes" }
+	write_run_output:
+		type: "string"
+		default: "false"
+		ui: { label: "Write output file to SAW_RUN_DIR (true/false)" }
+outputs:

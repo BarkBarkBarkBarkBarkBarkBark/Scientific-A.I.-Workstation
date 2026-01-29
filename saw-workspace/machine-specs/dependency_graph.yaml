@@ -1,0 +1,508 @@
+spec:
+  id: MR-SAW-RepoGraph-Introspection-v0.1
+  title: Repo Dependency Graph + Runtime Evidence Introspection (Imports/Calls/Coverage)
+  status: draft
+  owner: SAW
+  goals:
+    - Visualize repository structure as a directed graph:
+        nodes: files/modules
+        edges: imports (static)
+    - Accumulate runtime evidence over time to estimate:
+        - which files/functions execute
+        - how often they execute
+        - which modules are likely dead / redundant
+    - Expose the graph + evidence as:
+        - a manual UI tool (graph viewer + reports)
+        - an agent tool (machine-readable context + query interface)
+    - Ensure failures never brick SAW (same containment principles as plugins)
+  non_goals:
+    - Perfect soundness (dynamic imports/reflection will always exist)
+    - Automatic deletion of files (only recommend / propose diffs)
+    - Cross-repo monorepo correctness on day 1 (support later via scopes)
+
+assumptions:
+  languages:
+    - python
+    - javascript_typescript
+  saw_conventions:
+    plugin_dirs:
+      safebox: plugins/safebox/**
+      sandbox: plugins/sandbox/**
+    safety:
+      - sandbox failures never block app boot
+      - no code import during discovery; only metadata
+      - tool execution in isolated subprocesses with timeouts
+  repo_root: "<SAW_WORKSPACE_ROOT>"
+
+architecture:
+  components:
+    - name: repo_graph_service
+      type: backend_module
+      responsibilities:
+        - discover project roots and scopes
+        - run analyzers (static + runtime evidence ingestion)
+        - store normalized graph + evidence in Postgres
+        - serve query APIs for UI + agents
+    - name: analyzers
+      type: pluggable_executors
+      responsibilities:
+        - python_import_graph (static)
+        - js_ts_import_graph (static)
+        - python_call_counts (runtime profiling)
+        - python_coverage (runtime coverage)
+        - optional: python_call_graph_static (best-effort)
+    - name: postgres_storage
+      type: database
+      responsibilities:
+        - durable storage of scans, graph, evidence, and recommendations
+        - time-series accumulation by git commit hash
+    - name: graph_ui_panel
+      type: frontend_panel
+      responsibilities:
+        - interactive graph view + filters + evidence overlays
+        - dead-code candidates report
+        - drill-down file -> symbols -> runs
+    - name: agent_introspection_tool
+      type: agent_tool
+      responsibilities:
+        - provide compact graph context slices
+        - answer queries like:
+            - "what calls X?"
+            - "which modules are cold (never executed)?"
+            - "what changed in dependencies between commits?"
+            - "suggest safe deletions with evidence"
+
+data_model:
+  postgres:
+    schema: repo_intel
+    rationale:
+      - supports accumulation over time across commits
+      - enables diffs across scans
+      - supports agent queries without re-running analyzers
+    tables:
+      - name: repos
+        columns:
+          - { name: repo_id, type: uuid, pk: true }
+          - { name: name, type: text }
+          - { name: root_path, type: text }
+          - { name: created_at, type: timestamptz }
+      - name: scans
+        columns:
+          - { name: scan_id, type: uuid, pk: true }
+          - { name: repo_id, type: uuid, fk: repos.repo_id }
+          - { name: git_commit, type: text, index: true }
+          - { name: git_branch, type: text, null: true }
+          - { name: started_at, type: timestamptz }
+          - { name: finished_at, type: timestamptz, null: true }
+          - { name: status, type: text, enum: [running, ok, failed, partial] }
+          - { name: tool_versions, type: jsonb }
+          - { name: config, type: jsonb }
+          - { name: error, type: text, null: true }
+      - name: files
+        columns:
+          - { name: file_id, type: uuid, pk: true }
+          - { name: repo_id, type: uuid, fk: repos.repo_id }
+          - { name: rel_path, type: text, index: true }
+          - { name: language, type: text, enum: [py, ts, tsx, js, jsx, other] }
+          - { name: sha256, type: text }
+          - { name: loc, type: int, null: true }
+          - { name: is_generated, type: boolean, default: false }
+          - { name: is_test, type: boolean, default: false }
+      - name: scan_files
+        columns:
+          - { name: scan_id, type: uuid, fk: scans.scan_id, index: true }
+          - { name: file_id, type: uuid, fk: files.file_id, index: true }
+          - { name: present, type: boolean }
+        primary_key: [scan_id, file_id]
+      - name: import_edges
+        columns:
+          - { name: edge_id, type: uuid, pk: true }
+          - { name: scan_id, type: uuid, fk: scans.scan_id, index: true }
+          - { name: src_file_id, type: uuid, fk: files.file_id, index: true }
+          - { name: dst_file_id, type: uuid, fk: files.file_id, index: true }
+          - { name: kind, type: text, enum: [import, dynamic_import, require] }
+          - { name: raw, type: text, null: true }
+      - name: symbols
+        columns:
+          - { name: symbol_id, type: uuid, pk: true }
+          - { name: scan_id, type: uuid, fk: scans.scan_id, index: true }
+          - { name: file_id, type: uuid, fk: files.file_id, index: true }
+          - { name: fqname, type: text, index: true }
+          - { name: kind, type: text, enum: [function, class, method, module, variable] }
+          - { name: start_line, type: int, null: true }
+          - { name: end_line, type: int, null: true }
+      - name: runs
+        columns:
+          - { name: run_id, type: uuid, pk: true }
+          - { name: repo_id, type: uuid, fk: repos.repo_id }
+          - { name: git_commit, type: text, index: true }
+          - { name: started_at, type: timestamptz }
+          - { name: finished_at, type: timestamptz, null: true }
+          - { name: entrypoint, type: text }
+          - { name: args, type: jsonb }
+          - { name: env_fingerprint, type: text, null: true }
+          - { name: status, type: text, enum: [running, ok, failed, timeout] }
+          - { name: stdout, type: text, null: true }
+          - { name: stderr, type: text, null: true }
+          - { name: error, type: text, null: true }
+      - name: evidence_file_exec
+        purpose: "File-level runtime evidence (coverage/profiling-derived)"
+        columns:
+          - { name: run_id, type: uuid, fk: runs.run_id, index: true }
+          - { name: file_id, type: uuid, fk: files.file_id, index: true }
+          - { name: executed_lines, type: int, null: true }
+          - { name: total_lines, type: int, null: true }
+          - { name: exec_hits, type: bigint, null: true }
+          - { name: source, type: text, enum: [coverage, trace, profiler] }
+        primary_key: [run_id, file_id, source]
+      - name: evidence_symbol_calls
+        purpose: "Symbol-level call counts (best effort; depends on profiler output)"
+        columns:
+          - { name: run_id, type: uuid, fk: runs.run_id, index: true }
+          - { name: symbol_id, type: uuid, fk: symbols.symbol_id, index: true }
+          - { name: call_count, type: bigint }
+          - { name: cumulative_time_ms, type: double precision, null: true }
+          - { name: source, type: text, enum: [cprofile, pyinstrument, other] }
+        primary_key: [run_id, symbol_id, source]
+      - name: recommendations
+        columns:
+          - { name: rec_id, type: uuid, pk: true }
+          - { name: repo_id, type: uuid, fk: repos.repo_id }
+          - { name: scan_id, type: uuid, fk: scans.scan_id }
+          - { name: created_at, type: timestamptz }
+          - { name: type, type: text, enum: [dead_file_candidate, dead_symbol_candidate, risky_dynamic_import, cycle, high_fan_in, high_fan_out] }
+          - { name: severity, type: int, range: "1-5" }
+          - { name: payload, type: jsonb }
+          - { name: rationale, type: text }
+          - { name: suggested_actions, type: jsonb }
+    indexes:
+      - scans(repo_id, git_commit)
+      - files(repo_id, rel_path)
+      - import_edges(scan_id, src_file_id)
+      - import_edges(scan_id, dst_file_id)
+      - symbols(scan_id, fqname)
+      - evidence_file_exec(run_id, file_id)
+      - evidence_symbol_calls(run_id, symbol_id)
+
+analyzers:
+  execution_model:
+    isolation: subprocess
+    cwd: "<repo_root>"
+    timeout_seconds_default: 300
+    max_memory_mb_default: 2048
+    capture:
+      stdout: true
+      stderr: true
+    failure_policy:
+      - if analyzer fails: mark scan status partial; persist error; continue other analyzers
+      - never block SAW boot or plugin discovery
+  python_import_graph:
+    method_priority:
+      - ast_parse_imports_first_party_only
+      - fallback_pydeps_if_available
+    output:
+      - files list
+      - import_edges
+    edge_rules:
+      - resolve relative imports to rel_path when possible
+      - classify unresolved or string-based imports as dynamic_import with raw field
+  js_ts_import_graph:
+    method_priority:
+      - parse_es_imports_and_requires
+      - optional_madge_dependency_export
+    output:
+      - files list
+      - import_edges
+  python_coverage:
+    mechanism: coverage_py
+    inputs:
+      - entrypoint_command: "<string command or module>"
+      - args: ["<args>"]
+      - include_globs: ["**/*.py"]
+      - omit_globs: ["**/site-packages/**", "**/.venv/**", "**/tests/**"]
+    outputs:
+      - evidence_file_exec(executed_lines,total_lines)
+    notes:
+      - coverage evidence is only as good as chosen entrypoints/workflows
+  python_call_counts:
+    mechanism: cProfile
+    inputs:
+      - entrypoint_command: "<string command or module>"
+      - args: ["<args>"]
+    outputs:
+      - evidence_symbol_calls(call_count,cumulative_time_ms)
+    mapping:
+      - map profiler function identifiers to symbols.fqname best-effort
+      - if mapping fails: store as payload in recommendations type=risky_dynamic_import severity=2
+
+scan_workflows:
+  scan_types:
+    - name: static_scan
+      includes:
+        - python_import_graph
+        - js_ts_import_graph
+      triggers:
+        - manual_button
+        - agent_tool_call
+        - optional_on_git_change
+    - name: runtime_run
+      includes:
+        - python_coverage
+        - python_call_counts
+      triggers:
+        - manual_run_from_ui
+        - agent_tool_call
+  git_binding:
+    required_fields:
+      - git_commit
+    capture_method:
+      - run "git rev-parse HEAD" in subprocess; store in scans.git_commit and runs.git_commit
+  incremental_strategy:
+    - if file sha256 unchanged since last scan on same commit: reuse file_id
+    - if scan on new commit: create new scan_id but reuse stable file records by rel_path+sha256
+
+backend_api:
+  base: /repo-intel
+  endpoints:
+    - method: POST
+      path: /repos/register
+      body:
+        name: "<string>"
+        root_path: "<string>"
+      returns:
+        repo_id: "<uuid>"
+    - method: POST
+      path: /scans/start
+      body:
+        repo_id: "<uuid>"
+        scan_type: "static_scan|runtime_run"
+        config:
+          entrypoint_command: "<optional>"
+          args: ["<optional>"]
+      returns:
+        scan_id: "<uuid>"
+        status: "running"
+    - method: GET
+      path: /scans/{scan_id}
+      returns:
+        scan: "<scan row>"
+        progress:
+          analyzers: [{ name: "<analyzer>", status: "pending|running|ok|failed" }]
+    - method: GET
+      path: /graph
+      query:
+        repo_id: "<uuid>"
+        scan_id: "<uuid>"
+        scope_prefix: "<optional path prefix>"
+        include_tests: "<bool default false>"
+      returns:
+        nodes: [{ rel_path: "<string>", file_id: "<uuid>", language: "<enum>" }]
+        edges: [{ src_file_id: "<uuid>", dst_file_id: "<uuid>", kind: "<enum>" }]
+    - method: GET
+      path: /evidence/summary
+      query:
+        repo_id: "<uuid>"
+        git_commit: "<optional>"
+        time_window_days: "<optional>"
+      returns:
+        file_hotness:
+          - { rel_path: "<string>", exec_hits: "<bigint>", runs_seen: "<int>", last_seen_at: "<timestamptz>" }
+        cold_files:
+          - { rel_path: "<string>", reason: "never_seen_in_runs|excluded|unknown" }
+    - method: GET
+      path: /recommendations
+      query:
+        repo_id: "<uuid>"
+        scan_id: "<uuid>"
+        min_severity: "<int default 2>"
+      returns:
+        recommendations: ["<rows>"]
+    - method: POST
+      path: /recommendations/propose_patch
+      body:
+        repo_id: "<uuid>"
+        scan_id: "<uuid>"
+        rec_id: "<uuid>"
+        action: "delete_file|delete_symbol|refactor_split|add_ignore_rule"
+      returns:
+        patch_unified_diff: "<string>"
+      constraints:
+        - "NEVER apply patch automatically; return diff only (align with SAW patch flow)"
+
+frontend_ui:
+  panel:
+    name: Repo Graph
+    views:
+      - name: graph_view
+        features:
+          - zoom_pan
+          - filter_by_language
+          - filter_by_scope_prefix
+          - toggle_tests
+          - highlight_cycles
+          - color_by_hotness: "overlay from evidence_file_exec"
+          - select_node_shows:
+              - inbound_imports
+              - outbound_imports
+              - last_seen_runtime
+              - run_counts
+      - name: evidence_dashboard
+        features:
+          - top_hot_files
+          - cold_files
+          - top_called_symbols
+          - entrypoint_runs_history
+      - name: recommendations
+        features:
+          - list_sorted_by_severity
+          - show_rationale
+          - show_supporting_evidence
+          - button_generate_patch_diff
+  ui_outputs_for_agents:
+    - "export current filtered subgraph as JSON"
+    - "export recommendations as YAML"
+
+agent_introspection_tool:
+  name: repo_intel.query
+  purpose: "Provide graph + evidence context for planning/refactors and debt reduction."
+  io:
+    input_schema:
+      repo_id: "<uuid>"
+      query_type: "neighbors|path|cycles|hotness|coldness|owners|diff_between_commits|recommendations"
+      params: "<json>"
+      limits:
+        max_nodes: 400
+        max_edges: 1200
+        max_recs: 50
+    output_schema:
+      graph_slice:
+        nodes: ["<rel_path>"]
+        edges: ["<src_rel_path -> dst_rel_path>"]
+      evidence:
+        file_metrics: [{ rel_path: "<string>", exec_hits: "<bigint>", runs_seen: "<int>", last_seen_at: "<timestamptz>" }]
+        symbol_metrics: [{ fqname: "<string>", call_count: "<bigint>", cumulative_time_ms: "<float>", last_seen_at: "<timestamptz>" }]
+      recommendations: [{ type: "<enum>", severity: "<1-5>", rationale: "<string>", payload: "<json>" }]
+      caveats:
+        - "dynamic imports may hide dependencies"
+        - "coverage reflects selected entrypoints only"
+  default_queries:
+    - name: cold_files_in_scope
+      query_type: coldness
+      params: { scope_prefix: "src/", min_runs: 10 }
+    - name: top_fan_in
+      query_type: neighbors
+      params: { direction: inbound, order_by: "degree_desc" }
+    - name: cycle_report
+      query_type: cycles
+      params: { max_cycles: 20 }
+
+dead_code_heuristics:
+  scoring:
+    dead_file_candidate:
+      score_components:
+        - "not reachable from configured entrypoints in import graph (weight 2)"
+        - "0 executions across last N runs (weight 3)"
+        - "not referenced by tests (weight 1)"
+        - "is_generated=false (weight 1)"
+      thresholds:
+        severity_5: "score >= 6 and runs_seen >= 20"
+        severity_3: "score >= 4 and runs_seen >= 10"
+    dead_symbol_candidate:
+      requirements:
+        - "symbol exists in scans.symbols"
+        - "0 call_count across last N runs OR never mapped but file cold"
+  exclusions:
+    - patterns:
+        - "**/__init__.py"
+        - "**/migrations/**"
+        - "**/plugins/**"
+      reason: "often dynamically loaded or required by frameworks"
+    - config_driven_allowlist:
+        description: "User-maintained list of modules known to be loaded dynamically"
+        storage: "repo_intel.recommendations payload type=add_ignore_rule"
+
+security_and_safety:
+  principles:
+    - "read-only by default"
+    - "never delete automatically; only generate diffs"
+    - "subprocess execution only; no in-process importing arbitrary repo code"
+    - "respect SAW mode toggle: YOLO can only write in plugins/sandbox/**"
+  secrets:
+    - "do not store env values; only env_fingerprint hash"
+  limits:
+    - "cap graph slice sizes for agent responses"
+    - "cap scan frequency and duration"
+
+implementation_plan:
+  phases:
+    - phase: 0_foundation
+      deliverables:
+        - postgres schema migrations for repo_intel
+        - repo registration + scan lifecycle endpoints
+        - static python import graph via AST
+        - graph query endpoint returning nodes/edges
+    - phase: 1_runtime_evidence
+      deliverables:
+        - run execution record (runs table)
+        - coverage ingestion -> evidence_file_exec
+        - cProfile ingestion -> evidence_symbol_calls (best effort mapping)
+        - evidence summary endpoint
+    - phase: 2_recommendations
+      deliverables:
+        - heuristics engine writing recommendations per scan
+        - propose_patch endpoint returning unified diff only
+        - allowlist/ignore-rule mechanism
+    - phase: 3_ui_and_agent_tooling
+      deliverables:
+        - graph UI panel with hotness overlay
+        - recommendations UI with "generate diff" action
+        - agent tool repo_intel.query with bounded output
+
+acceptance_tests:
+  - name: scan_does_not_brick_app
+    criteria:
+      - "If analyzer fails, scan status=partial; API still serves last good scan"
+  - name: static_graph_basic
+    criteria:
+      - "Import edges exist for known imports in a sample package"
+  - name: runtime_evidence_recorded
+    criteria:
+      - "After a run, evidence_file_exec rows exist for executed files"
+  - name: recommendations_generated
+    criteria:
+      - "Cold files in a controlled fixture repo produce dead_file_candidate recs"
+  - name: propose_patch_returns_diff_only
+    criteria:
+      - "Endpoint returns unified diff string; no filesystem modifications occur"
+  - name: yolo_write_constraints_respected
+    criteria:
+      - "Any automated writes limited to plugins/sandbox/** (if integrated later)"
+
+configuration:
+  repo_intel_config_file: "<repo_root>/.saw/repo_intel.yaml"
+  fields:
+    entrypoints:
+      - name: "api_server"
+        command: "python -m saw_api"
+        args: []
+      - name: "frontend_build"
+        command: "npm run build"
+        args: []
+    excludes:
+      - "**/.venv/**"
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+    dynamic_import_allowlist:
+      - "plugins.*"
+      - "importlib.*"
+
+notes:
+  why_postgres_is_good_here:
+    - "enables accumulation over time across commits and runs"
+    - "lets agents query evidence without rerunning expensive analyzers"
+    - "supports diffs and trend reports (technical debt regression detection)"
+  known_risks:
+    - "dynamic imports reduce static accuracy"
+    - "coverage depends on chosen entrypoints; add more runs over time"
+    - "symbol mapping from profiler can be imperfect; track mapping confidence"

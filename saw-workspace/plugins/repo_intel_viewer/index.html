@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Repo Intel Viewer</title>
+</head>
+<body>
+  <h1>Repo Intel Viewer</h1>
+  <form method="get" action="/repo/{{ repos[0].repo_id }}/scan">
+    <label for="repo">Select Repo:</label>
+    <select name="repo_id" id="repo">
+      {% for repo in repos %}
+      <option value="{{ repo.repo_id }}">{{ repo.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">View Scans</button>
+  </form>
+</body>
+</html>

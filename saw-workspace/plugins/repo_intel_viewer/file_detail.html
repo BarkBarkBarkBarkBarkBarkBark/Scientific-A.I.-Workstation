@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>File Detail</title>
+</head>
+<body>
+  <h1>File: {{ card.rel_path }}</h1>
+  <form method="post">
+    <textarea name="description_md" rows="10" cols="80">{{ card.description_md or '' }}</textarea><br>
+    <input type="hidden" name="rel_path" value="{{ card.rel_path }}" />
+    <button type="submit">Save Description</button>
+  </form>
+  <h2>Outbound Imports</h2>
+  <ul>
+    {% for dep in card.deps_out %}
+    <li>{{ dep }}</li>
+    {% endfor %}
+  </ul>
+  <h2>Inbound Users</h2>
+  <ul>
+    {% for dep in card.deps_in %}
+    <li>{{ dep }}</li>
+    {% endfor %}
+  </ul>
+</body>
+</html>

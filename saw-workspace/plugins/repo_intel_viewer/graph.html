@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Repo Graph</title>
+  <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+</head>
+<body>
+  <h1>Repo Graph</h1>
+  <div id="cy" style="width: 100vw; height: 80vh; border: 1px solid #ccc;"></div>
+  <script>
+    const graph = {{ graph | tojson }};
+    const cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements: [
+        ...graph.nodes.map(n => ({ data: { id: n.rel_path, label: n.rel_path } })),
+        ...graph.edges.map(e => ({ data: { source: e.src_file_id, target: e.dst_file_id } }))
+      ],
+      style: [{ selector: 'node', style: { 'label': 'data(label)' } }],
+      layout: { name: 'cose' }
+    });
+  </script>
+</body>
+</html>

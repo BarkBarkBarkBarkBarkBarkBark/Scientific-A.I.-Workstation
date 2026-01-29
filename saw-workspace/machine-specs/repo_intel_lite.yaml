@@ -1,0 +1,209 @@
+spec:
+  id: MR-SAW-RepoIntel-ReviewOnly-MVP-v0.1
+  title: Repo Intel MVP (Review-only): file index + reverse deps + per-file descriptions + standalone viewer
+  status: ready_for_agent
+  scope:
+    include:
+      - static_scan results visible in a GUI (no CLI)
+      - list all files for a repo+scan
+      - show inbound users (reverse deps) and outbound imports
+      - allow per-file description editing and persistence in Postgres
+      - optional graph visualization (basic)
+      - standalone web viewer server on a new port, launched from SAW plugin/action
+    exclude:
+      - any patch/diff generation (no propose_patch usage in MVP)
+      - any automated edits to repo files (no tagging headers yet)
+      - runtime evidence (coverage/cProfile) (defer)
+      - document generator (reports) (defer)
+      - SCC/cycle analysis (defer unless trivial)
+
+  reality_check_guidance:
+    why_this_mvp:
+      - "Gets immediate value: you can browse the repo like a dependency-aware IDE index."
+      - "Creates durable repo state in DB: descriptions become your living 'repo notebook'."
+      - "De-risks UI/UX before committing to deep SAW frontend integration."
+    later_extensions:
+      - "Add runtime evidence + hot/cold files."
+      - "Add SCC/cycle + 'mutual dependency' reports."
+      - "Add LLM auto-describe button + consolidation."
+      - "Add diff proposals + deprecate tags."
+
+existing_system_context:
+  backend_router:
+    file: services/saw_api/app/repo_intel/router.py
+    prefix: /repo-intel
+    existing_endpoints_used_in_mvp:
+      - POST /repo-intel/repos/register
+      - POST /repo-intel/scans/start
+      - GET /repo-intel/scans/{scan_id}
+      - GET /repo-intel/graph
+    endpoints_not_used_in_mvp:
+      - GET /repo-intel/evidence/summary
+      - GET /repo-intel/recommendations
+      - POST /repo-intel/recommendations/propose_patch
+  database_migration:
+    repo_intel_base: services/saw_api/migrations/003_repo_intel.sql
+  analyzers:
+    ts_js:
+      tool: tools/repo_intel/depcruise_graph.mjs
+    python:
+      module: services/saw_api/app/repo_intel/py_import_graph.py (or equivalent)
+
+mvp_user_flow_gui_only:
+  flow:
+    - step: register_repo
+      ui: "Repo Intel Viewer: Register form"
+      action: "POST /repo-intel/repos/register"
+      result: "repo_id saved"
+    - step: run_static_scan
+      ui: "Repo Intel Viewer: Start Scan button"
+      action: "POST /repo-intel/scans/start (scan_type=static_scan)"
+      result: "scan_id saved, poll status"
+    - step: view_repo_index
+      ui: "Repo Intel Viewer: File list"
+      action: "GET /repo-intel/graph?repo_id&scan_id"
+      result: "render file list + dependency edges"
+    - step: inspect_file
+      ui: "Select file → shows inbound/outbound deps + description editor"
+      action: "viewer endpoints backed by DB + graph payload"
+    - step: write_description
+      ui: "Save description button"
+      action: "POST viewer endpoint (writes to Postgres)"
+      result: "description persisted and versioned"
+
+standalone_viewer_server:
+  goal: "Launch a separate web UI on a new port from inside SAW (plugin/action), for review-only browsing."
+  implementation:
+    location: plugins/sandbox/repo_intel_viewer/
+    files:
+      - wrapper.py
+      - plugin.yaml
+      - viewer_app.py
+  server_stack:
+    framework: fastapi
+    runner: uvicorn
+    port_strategy:
+      choose_free_port: true
+      port_range: [5210, 5299]
+      bind_host: "127.0.0.1"
+    open_in_browser:
+      primary: "Return URL to SAW UI to open as clickable link"
+      optional: "python webbrowser.open(url) (best-effort; do not block if fails)"
+  viewer_ui_strategy:
+    mvp_ui: "Server-rendered HTML + minimal JS (no build step)"
+    optional_graph: "Cytoscape via CDN (only if quick); otherwise table-only is acceptable"
+    pages:
+      - path: /
+        purpose: "Repo select + scan select + start scan"
+      - path: /repo/{repo_id}/scan/{scan_id}
+        purpose: "File list + filters + search"
+      - path: /repo/{repo_id}/scan/{scan_id}/file
+        purpose: "File detail (deps + description editor)"
+  dependencies:
+    python:
+      - fastapi
+      - uvicorn
+      - jinja2 (optional for templates)
+    notes:
+      - "Do not add a frontend build system in MVP."
+
+mvp_backend_additions:
+  approach: "Add minimal endpoints for file cards/descriptions; reuse existing scan/graph endpoints."
+  new_endpoints_in_repo_intel_router:
+    - name: list_repos
+      method: GET
+      path: /repo-intel/repos
+      purpose: "Viewer can list repos without CLI"
+      response:
+        repos: [{ repo_id: string, name: string, root_path: string, created_at: string|null }]
+    - name: list_scans
+      method: GET
+      path: /repo-intel/scans
+      purpose: "Viewer can list scans for a repo"
+      query: { repo_id: string, limit: int=50, offset: int=0 }
+      response:
+        scans: [{ scan_id: string, repo_id: string, scan_type: string, status: string, started_at: string|null, finished_at: string|null }]
+    - name: file_card_get
+      method: GET
+      path: /repo-intel/file-card
+      purpose: "Fetch persisted description + lightweight computed deps for a file"
+      query: { repo_id: string, scan_id: string, rel_path: string }
+      response:
+        rel_path: string
+        description_md: string|null
+        updated_at: string|null
+        deps_out: [string]   # rel_paths
+        deps_in: [string]    # rel_paths
+    - name: file_card_upsert
+      method: POST
+      path: /repo-intel/file-card
+      purpose: "Persist per-file description (human-authored)"
+      request:
+        repo_id: string
+        scan_id: string
+        rel_path: string
+        description_md: string
+        author: string|null
+      response:
+        ok: boolean
+        updated_at: string
+
+mvp_database_changes:
+  migration_file: services/saw_api/migrations/004_repo_intel_file_cards.sql
+  tables:
+    - name: repo_intel.file_cards
+      purpose: "Persist human-written (and later machine-written) per-file descriptions."
+      columns:
+        - { name: repo_id, type: uuid, fk: repo_intel.repos.repo_id, index: true }
+        - { name: scan_id, type: uuid, fk: repo_intel.scans.scan_id, index: true }
+        - { name: rel_path, type: text, index: true }
+        - { name: description_md, type: text }
+        - { name: author, type: text, null: true }
+        - { name: updated_at, type: timestamptz, default: "now()" }
+      primary_key: [repo_id, scan_id, rel_path]
+  notes:
+    - "Tie descriptions to scan_id initially (explicit state snapshots). Later you can promote to repo-level or HEAD-level semantics."
+
+mvp_computation_logic:
+  reverse_deps:
+    computed_from: "import_edges joined with files by scan_id"
+    output:
+      deps_out: "dst rel_paths where src=target"
+      deps_in: "src rel_paths where dst=target"
+  file_list:
+    computed_from: "scan_files/files where scan_id"
+    ordering: "rel_path asc"
+  filtering:
+    - by scope_prefix
+    - by language
+    - text search over rel_path
+  caching:
+    - "Viewer can cache graph payload in memory per (repo_id, scan_id) for responsiveness."
+
+ui_requirements_minimum:
+  must_have:
+    - "Searchable file list"
+    - "File detail view with inbound/outbound deps"
+    - "Description editor with Save"
+    - "Repo + Scan selectors"
+    - "Start static scan + progress polling"
+  nice_to_have:
+    - "Graph visualization"
+    - "Inline dependency tree expansion"
+    - "Show git_commit from scans"
+
+acceptance_criteria:
+  - "User can open viewer in browser from SAW (no CLI)."
+  - "User can register repo, start static scan, and view file list."
+  - "Selecting a file shows: (1) files it imports, (2) files importing it."
+  - "User can write a description for a file and it persists in Postgres."
+  - "Refreshing the page retains descriptions."
+  - "Failures in scan or viewer do not crash SAW."
+
+implementation_order:
+  - "Add DB migration: repo_intel.file_cards"
+  - "Add minimal list endpoints: GET /repos, GET /scans"
+  - "Add file-card GET/POST endpoints"
+  - "Implement viewer_app.py (FastAPI) + minimal HTML pages"
+  - "Add SAW plugin wrapper that launches uvicorn on a free port and returns the URL"
+  - "Polish: basic graph view (optional), better filters"
