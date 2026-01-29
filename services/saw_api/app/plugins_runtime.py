@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 from . import env_manager
 from .settings import Settings
 
+logger = logging.getLogger(__name__)
 
 SideEffectNetwork = Literal["none", "restricted", "allowed"]
 SideEffectDisk = Literal["read_only", "read_write"]
@@ -102,6 +104,15 @@ class DiscoveredPlugin:
     plugin_dir: str
 
 
+def validate_plugin_manifest(manifest_path: str) -> tuple[PluginManifest | None, str | None]:
+    try:
+        raw = yaml.safe_load(open(manifest_path, "r", encoding="utf-8"))
+        manifest = PluginManifest.model_validate(raw)
+        return manifest, None
+    except Exception as exc:
+        return None, str(exc)
+
+
 def discover_plugins(settings: Settings) -> list[DiscoveredPlugin]:
     root = settings.workspace_root
     plugins_dir = os.path.join(root, "plugins")
@@ -112,10 +123,11 @@ def discover_plugins(settings: Settings) -> list[DiscoveredPlugin]:
         if "plugin.yaml" not in filenames:
             continue
         manifest_path = os.path.join(dirpath, "plugin.yaml")
-        raw = yaml.safe_load(open(manifest_path, "r", encoding="utf-8"))
-        # Pydantic v2: model_validate
-        m = PluginManifest.model_validate(raw)
-        out.append(DiscoveredPlugin(manifest=m, plugin_dir=dirpath))
+        manifest, err = validate_plugin_manifest(manifest_path)
+        if manifest:
+            out.append(DiscoveredPlugin(manifest=manifest, plugin_dir=dirpath))
+        else:
+            logger.warning("Skipping plugin manifest %s: %s", manifest_path, err)
         # don't recurse deeper once a plugin root found
         dirnames[:] = []
     out.sort(key=lambda p: p.manifest.id)
