@@ -1,21 +1,20 @@
-panel:
-  id: repo-intel-viewer
-  title: Repo Intel Viewer
-  tabs:
-    - id: files
-      title: Files
-    - id: graph
-      title: Graph
-    - id: details
-      title: Details
-  actions:
-    - id: register_repo
-      label: Register Repo
-    - id: start_scan
-      label: Start Scan
-    - id: save_description
-      label: Save Description
-    - id: select_file
-      label: Select File
-    - id: select_scan
-      label: Select Scan
+declarative_ui_spec_version: "0.1"
+context:
+  defaults:
+    uiState: {}
+computed: {}
+queries: {}
+actions: {}
+lifecycle: {}
+view:
+  type: Stack
+  props: { gap: md }
+  children:
+    - type: Panel
+      props: { title: "Repo Intel Viewer", variant: default }
+      children:
+        - type: Text
+          props: { variant: muted }
+          text: "Run this node to launch the local viewer web app."
+    - type: NodeParameters
+    - type: NodeRunPanel

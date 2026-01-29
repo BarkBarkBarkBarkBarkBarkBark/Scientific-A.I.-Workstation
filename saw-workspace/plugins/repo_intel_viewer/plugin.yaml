@@ -1,40 +1,51 @@
 id: "repo_intel_viewer"
 name: "Repo Intel Viewer"
 version: "0.1.0"
-description: "Standalone repo graph and file index viewer with descriptions."
+description: "Lightweight repo dependency viewer with a launch button."
 category_path: "tools"
 meta:
-	human_description: "Browse and annotate repository file relationships and descriptions."
-	machine_description: "Visualizes repo file graph and allows editing per-file descriptions."
-	tags: ["repo", "graph", "viewer", "declarativeUi"]
-	docs:
-		readme: "README.md"
-		agent_context: "AGENT_CONTEXT.md"
-		declarative_ui_ui: "ui/declarative_ui.yaml"
+  human_description: "Launches a small web app to view repo import graph and not-imported files."
+  machine_description: "Starts a local FastAPI viewer for the repo dependency graph."
+  tags: ["repo", "graph", "viewer"]
+  docs:
+    readme: "README.md"
+    agent_context: "AGENT_CONTEXT.md"
+    declarative_ui_ui: "ui/declarative_ui.yaml"
 entrypoint:
-	file: "wrapper.py"
-	callable: "main"
+  file: "wrapper.py"
+  callable: "main"
 environment:
-	python: ">=3.11,<3.13"
-	pip: []
+  python: ">=3.11,<3.13"
+  pip: []
 inputs:
-	in_obj:
-		type: "object"
-		ui: { label: "Input object (optional)" }
-	in_path:
-		type: "path"
-		ui: { label: "Workspace-relative path (optional)" }
+  in_obj:
+    type: "object"
+    ui: { label: "Input object (optional)" }
+  in_path:
+    type: "path"
+    ui: { label: "Workspace-relative path (optional)" }
 params:
-	message:
-		type: "string"
-		default: "Hello from repo_intel_viewer"
-		ui: { label: "Message" }
-	preview_bytes:
-		type: "number"
-		default: 256
-		ui: { label: "File preview bytes" }
-	write_run_output:
-		type: "string"
-		default: "false"
-		ui: { label: "Write output file to SAW_RUN_DIR (true/false)" }
+  message:
+    type: "string"
+    default: "Launch Repo Intel Viewer"
+    ui: { label: "Message" }
 outputs:
+  url:
+    type: "string"
+  pid:
+    type: "number"
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: "local_only"
+  disk: "read_only"
+  subprocess: "allowed"
+resources:
+  gpu: "forbidden"
+  threads: 1
+ui:
+  mode: "schema"
+  schema_file: "ui/declarative_ui.yaml"
+  bundle_file: "ui/ui.bundle.js"
+  sandbox: true

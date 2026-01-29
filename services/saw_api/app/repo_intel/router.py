@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -18,6 +20,7 @@ from .service import (
     start_scan_background,
 )
 from .file_card import file_card_router
+from .simple_graph import build_simple_graph
 
 
 settings = get_settings()
@@ -42,6 +45,20 @@ def repos_register(req: RegisterRepoRequest) -> RegisterRepoResponse:
         return RegisterRepoResponse(repo_id=repo_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"repo_register_failed: {e}")
+
+
+@router.get("/repos")
+def repos_list() -> Any:
+    with db_conn(settings) as conn:
+        rows = conn.execute(
+            "SELECT repo_id, name, root_path FROM repo_intel.repos ORDER BY name",
+        ).fetchall()
+        return {
+            "repos": [
+                {"repo_id": str(repo_id), "name": str(name), "root_path": str(root_path)}
+                for repo_id, name, root_path in rows
+            ]
+        }
 
 
 class StartScanRequest(BaseModel):
@@ -96,6 +113,31 @@ def graph_get(
             return get_graph(conn, repo_id, scan_id, scope_prefix, include_tests)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"graph_failed: {e}")
+
+
+@router.get("/simple-graph")
+def simple_graph_get(
+    repo_root: str,
+    include_python: bool = True,
+    include_ts: bool = False,
+    include_tests: bool = False,
+    scope_prefix: str | None = Query(None),
+    max_files: int = 6000,
+) -> Any:
+    repo_root_path = repo_root.strip()
+    if not repo_root_path:
+        raise HTTPException(status_code=400, detail="repo_root_required")
+    repo_root_abs = os.path.abspath(repo_root_path)
+    if not os.path.isdir(repo_root_abs):
+        raise HTTPException(status_code=400, detail="repo_root_not_found")
+    return build_simple_graph(
+        repo_root=Path(repo_root_abs),
+        include_python=include_python,
+        include_ts=include_ts,
+        include_tests=include_tests,
+        scope_prefix=scope_prefix or "",
+        max_files=max_files,
+    )
 
 
 @router.get("/evidence/summary")
