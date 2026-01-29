@@ -1,0 +1,95 @@
+declarative_ui_spec_version: "0.1"
+kind: "PluginModule"
+pluginId: "repo_intel_viewer"
+title: "Repo Intel Viewer"
+subtitle: "Launch standalone graph viewer"
+
+computed:
+  url:
+    op: trim
+    args: ["${node.data.runtime.exec.last.outputs.status.metadata.url}"]
+  hasUrl:
+    op: gt
+    args:
+      - { op: len, args: ["${computed.url}"] }
+      - 0
+
+view:
+  type: Stack
+  props: { gap: md }
+  children:
+    - type: Panel
+      props: { variant: moduleHeader }
+      children:
+        - type: Row
+          props: { justify: spaceBetween, align: center }
+          children:
+            - type: Stack
+              props: { gap: xs }
+              children:
+                - type: Text
+                  props: { variant: title }
+                  text: "${document.title}"
+                - type: Text
+                  props: { variant: subtitle }
+                  text: "${document.subtitle}"
+            - type: Badge
+              props:
+                kind:
+                  op: if
+                  args:
+                    - { op: eq, args: ["${node.data.status}", running] }
+                    - warn
+                    - neutral
+              text:
+                op: if
+                args:
+                  - { op: eq, args: ["${node.data.status}", running] }
+                  - "Running…"
+                  - "Idle"
+
+    - type: Panel
+      props: { title: "Launch" }
+      children:
+        - type: Row
+          props: { justify: spaceBetween, align: center }
+          children:
+            - type: Text
+              props: { variant: muted }
+              text: "Starts the viewer on a free local port and opens it in your browser."
+            - type: Button
+              props:
+                label: "Launch Viewer"
+                variant: primary
+                disabled:
+                  op: eq
+                  args: ["${node.data.status}", running]
+                onClick:
+                  action: actions.runPluginNode
+                  event: { nodeId: "${node.id}" }
+
+        - type: InlineError
+          props:
+            visible: "${node.data.status == 'error'}"
+            message: "${node.data.runtime.exec.last.error}"
+
+        - type: Text
+          props: { variant: muted }
+          text:
+            op: if
+            args:
+              - "${computed.hasUrl}"
+              - "Viewer URL"
+              - "Viewer URL (launch to generate)"
+
+        - type: CodeBlock
+          props:
+            language: "text"
+            value:
+              op: if
+              args:
+                - "${computed.hasUrl}"
+                - "${computed.url}"
+                - "—"
+
+    - type: NodeRunPanel

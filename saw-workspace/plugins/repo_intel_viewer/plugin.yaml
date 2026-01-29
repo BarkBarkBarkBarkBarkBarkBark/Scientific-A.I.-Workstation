@@ -15,7 +15,11 @@ entrypoint:
   callable: "main"
 environment:
   python: ">=3.11,<3.13"
-  pip: []
+  pip:
+    - fastapi
+    - uvicorn
+    - httpx
+    - jinja2
 inputs: {}
 params: {}
 outputs:
@@ -25,9 +29,14 @@ execution:
   deterministic: false
   cacheable: false
 side_effects:
-  network: "none"
+  network: "allowed"
   disk: "read_only"
   subprocess: "allowed"
 resources:
   gpu: "forbidden"
   threads: 1
+
+ui:
+  mode: "schema"
+  schema_file: "ui/declarative_ui.yaml"
+  sandbox: true

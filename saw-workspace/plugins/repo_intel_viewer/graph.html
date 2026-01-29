@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Repo Graph</title>
+  <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+</head>
+<body>
+  <h1>Repo Graph</h1>
+  <p><strong>Repo root:</strong> {{ repo_root }}</p>
+  <div id="cy" style="width: 100vw; height: 80vh; border: 1px solid #ccc;"></div>
+  <script>
+    const graph = {{ graph | tojson }};
+    const cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements: [
+        ...graph.nodes.map(n => ({ data: { id: n.id, label: n.rel_path } })),
+        ...graph.edges.map(e => ({ data: { source: e.src, target: e.dst } }))
+      ],
+      style: [{ selector: 'node', style: { 'label': 'data(label)' } }],
+      layout: { name: 'cose' }
+    });
+  </script>
+  <h2>Files not imported by any other scanned file</h2>
+  <p>These have in-degree = 0. They may be entrypoints or candidates for deprecation.</p>
+  <ul>
+    {% for rel in graph.not_imported %}
+    <li>{{ rel }}</li>
+    {% endfor %}
+  </ul>
+  <h2>Isolated files (no imports, not imported)</h2>
+  <ul>
+    {% for rel in graph.isolated %}
+    <li>{{ rel }}</li>
+    {% endfor %}
+  </ul>
+</body>
+</html>
