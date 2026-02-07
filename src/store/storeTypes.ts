@@ -70,7 +70,11 @@ export type SawState = {
   }
 
   // Dev / patch engine
-  dev: { attachedPaths: string[]; lastForbidden?: { op: string; path: string; patch?: string } | null }
+  dev: {
+    attachedPaths: string[]
+    lastForbidden?: { op: string; path: string; patch?: string } | null
+    dangerousPluginHotEditEnabled?: boolean
+  }
   patchReview: { open: boolean; busy: boolean; proposal: PatchProposal | null; lastError?: string }
 
   // Plugins
@@ -126,6 +130,7 @@ export type SawState = {
   devAttachPath: (path: string) => void
   devDetachPath: (path: string) => void
   devClearAttachments: () => void
+  setDangerousPluginHotEditEnabled: (enabled: boolean) => void
   applyPatch: (patch: string) => Promise<{ ok: boolean; error?: string }>
   commitAll: (message: string) => Promise<{ ok: boolean; error?: string }>
   grantWriteCaps: (rulePath: string) => Promise<{ ok: boolean; error?: string }>

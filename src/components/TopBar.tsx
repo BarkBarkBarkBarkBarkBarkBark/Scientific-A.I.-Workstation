@@ -3,6 +3,7 @@ import { useSawStore } from '../store/useSawStore'
 export function TopBar() {
   const editableMode = useSawStore((s) => s.editableMode)
   const setEditableMode = useSawStore((s) => s.setEditableMode)
+  const setDangerousPluginHotEditEnabled = useSawStore((s) => s.setDangerousPluginHotEditEnabled)
   const layoutMode = useSawStore((s) => s.layoutMode)
   const setLayoutMode = useSawStore((s) => s.setLayoutMode)
   const reflowPipeline = useSawStore((s) => s.reflowPipeline)
@@ -37,7 +38,13 @@ export function TopBar() {
           <span className="text-zinc-400">Editable Mode</span>
           <button
             type="button"
-            onClick={() => setEditableMode(!editableMode)}
+            onClick={() => {
+              const next = !editableMode
+              setEditableMode(next)
+              // In dev, treat the top-level Editable Mode toggle as the master
+              // switch for human hot-editing of workspace plugin sources.
+              if (import.meta.env.DEV) setDangerousPluginHotEditEnabled(next)
+            }}
             className={[
               'relative h-6 w-11 rounded-full border border-zinc-700 transition',
               editableMode ? 'bg-emerald-600/60' : 'bg-zinc-800',

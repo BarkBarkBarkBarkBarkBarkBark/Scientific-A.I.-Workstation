@@ -69,6 +69,7 @@ export function ModuleFullscreenModal() {
   const fullscreen = useSawStore((s) => s.fullscreen)
   const closeFullscreen = useSawStore((s) => s.closeFullscreen)
   const editableMode = useSawStore((s) => s.editableMode)
+  const dangerousHotEdit = useSawStore((s) => s.dev?.dangerousPluginHotEditEnabled ?? false)
   const pluginCatalog = useSawStore((s) => s.pluginCatalog)
   const runPluginNode = useSawStore((s) => s.runPluginNode)
   const layout = useSawStore((s) => s.layout)
@@ -106,6 +107,12 @@ export function ModuleFullscreenModal() {
   const wrapperPath = (plugin?.sourcePaths ?? []).find((p) => p.endsWith('/wrapper.py')) ?? ''
   const isWorkspacePlugin = Boolean(manifestPath && wrapperPath)
   const isLockedStock = Boolean(isWorkspacePlugin && plugin?.locked && plugin?.origin === 'stock')
+  const isDev = import.meta.env.DEV
+  const allowHotEdit = Boolean(isDev && editableMode && dangerousHotEdit && isWorkspacePlugin && !isLockedStock)
+  const canEditPath = (p: string) => {
+    const x = String(p || '').replaceAll('\\', '/').trim()
+    return Boolean(allowHotEdit && x.startsWith('saw-workspace/plugins/'))
+  }
   const canShowAppPane = Boolean(isWorkspacePlugin && plugin?.ui?.mode === 'bundle')
   const pluginRoot = useMemo(() => {
     if (!isWorkspacePlugin) return ''
@@ -321,7 +328,7 @@ export function ModuleFullscreenModal() {
                             LOCKED
                           </span>
                         ) : null}
-                        <span>read-only</span>
+                        <span>{allowHotEdit ? 'hot-edit' : 'read-only'}</span>
                       </span>
                     ) : codeTab === 'python' ? (
                       editableMode ? 'editable' : 'read-only'
@@ -363,9 +370,9 @@ export function ModuleFullscreenModal() {
                 <div className="min-h-0 flex-1">
                   {isWorkspacePlugin ? (
                     codeTab === 'source' ? (
-                      <ReadOnlyFileViewer path={manifestPath} />
+                      <ReadOnlyFileViewer path={manifestPath} canEdit={canEditPath(manifestPath)} />
                     ) : codeTab === 'python' ? (
-                      <ReadOnlyFileViewer path={wrapperPath} />
+                      <ReadOnlyFileViewer path={wrapperPath} canEdit={canEditPath(wrapperPath)} />
                     ) : codeTab === 'app' ? (
                       <div className="h-full overflow-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
                         <BundlePluginUi nodeId={node.id} plugin={plugin} fallback={defaultUi} />
@@ -409,7 +416,7 @@ export function ModuleFullscreenModal() {
                         </div>
                         <div className="min-h-0 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
                           {dirSelectedPath ? (
-                            <ReadOnlyFileViewer path={dirSelectedPath} />
+                            <ReadOnlyFileViewer path={dirSelectedPath} canEdit={canEditPath(dirSelectedPath)} />
                           ) : (
                             <div className="p-3 text-[11px] text-zinc-500">Select a file to preview.</div>
                           )}
