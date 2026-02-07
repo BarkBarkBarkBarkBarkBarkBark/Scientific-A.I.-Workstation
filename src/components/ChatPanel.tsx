@@ -407,11 +407,19 @@ export function ChatPanel() {
         >
           Patch
         </button>
-        <input
+        <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return
+            if (e.shiftKey) return
+            // Preserve “Enter sends” behavior from the old single-line input.
+            e.preventDefault()
+            ;(e.currentTarget.form as HTMLFormElement | null)?.requestSubmit()
+          }}
           placeholder="Ask SAW… (e.g. ‘How do I connect audio_lowpass to plot?’)"
-          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-700"
+          rows={2}
+          className="w-full resize-none rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-700 break-words"
           disabled={busy}
         />
         {busy ? (
