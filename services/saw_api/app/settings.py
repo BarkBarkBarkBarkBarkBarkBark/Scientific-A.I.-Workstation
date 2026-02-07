@@ -10,8 +10,13 @@ class Settings:
     db_admin_url: str
     embed_model: str
     openai_api_key: str | None
+    auto_approve_vector_search: bool
     workspace_root: str
     allowed_origins: list[str]
+
+
+def _truthy(s: str | None) -> bool:
+    return str(s or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 def _repo_root_from_workspace(workspace_root: str) -> str:
     return os.path.abspath(os.path.join(workspace_root, ".."))
@@ -67,6 +72,7 @@ def get_settings() -> Settings:
     db_admin_url = env_or_dotenv("SAW_DB_ADMIN_URL") or "postgresql://saw_admin:saw_admin@127.0.0.1:54329/saw"
     embed_model = env_or_dotenv("SAW_EMBED_MODEL") or "text-embedding-3-small"
     openai_api_key = env_or_dotenv("OPENAI_API_KEY")
+    auto_approve_vector_search = _truthy(env_or_dotenv("SAW_AUTO_APPROVE_VECTOR_SEARCH"))
     allowed_origins = [
         os.environ.get("SAW_ALLOWED_ORIGIN") or "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -76,6 +82,7 @@ def get_settings() -> Settings:
         db_admin_url=db_admin_url,
         embed_model=embed_model,
         openai_api_key=openai_api_key,
+        auto_approve_vector_search=auto_approve_vector_search,
         workspace_root=workspace_root,
         allowed_origins=allowed_origins,
     )

@@ -237,6 +237,10 @@ export SAW_AGENT_MODEL="${SAW_AGENT_MODEL:-gpt-5.2}"
 export SAW_COPILOT_MODEL="${SAW_COPILOT_MODEL:-gpt-5.2}"
 export SAW_COPILOT_LOG_LEVEL="${SAW_COPILOT_LOG_LEVEL:-info}"
 
+# Dev default: make semantic vector lookups auto-run without approval prompts.
+# Override by setting SAW_AUTO_APPROVE_VECTOR_SEARCH=0 if you want approval gating.
+export SAW_AUTO_APPROVE_VECTOR_SEARCH="${SAW_AUTO_APPROVE_VECTOR_SEARCH:-1}"
+
 # If COPILOT_CLI_PATH isn't set, use our wrapper when present.
 if [[ -z "${COPILOT_CLI_PATH:-}" ]] && [[ -f "$ROOT_DIR/scripts/sub/copilot_cli_wrapper.sh" ]]; then
   export COPILOT_CLI_PATH="$ROOT_DIR/scripts/sub/copilot_cli_wrapper.sh"

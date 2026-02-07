@@ -1,0 +1,808 @@
+{
+  "ok": false,
+  "at": "2026-02-07T20:24:05.377167+00:00",
+  "mode": "probe",
+  "spec_sha256": "c1760d27fea8f63fd45614cf22a98ccc2b829601b9fbeec4314b7ad13ff10dc6",
+  "spec_path_rel": "machine-context/api_endpoints.json",
+  "services": [
+    {
+      "id": "saw_api",
+      "base_url_env": "SAW_API_URL",
+      "default_base_url": "http://localhost:5127",
+      "browser_base": "/api/saw",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/health",
+          "browser_path": "/api/saw/health",
+          "description": "Overall health (db_ok/db_error, openai_enabled, copilot_available/copilot_ok + copilot detail)."
+        },
+        {
+          "method": "POST",
+          "path": "/api-health/report",
+          "browser_path": "/api/saw/api-health/report",
+          "description": "Single canonical API health report endpoint (safe-by-default probes + optional cache artifact).",
+          "body": {
+            "mode": "spec|probe",
+            "include_services": "string[]?",
+            "allow_ai": "boolean",
+            "allow_writes": "boolean",
+            "allow_plugins": "boolean",
+            "allow_benign_writes": "boolean",
+            "timeout_sec": "number",
+            "prefer_localhost": "boolean",
+            "use_cache": "boolean",
+            "max_age_sec": "integer",
+            "write_cache": "boolean"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/agent/chat",
+          "browser_path": "/api/saw/agent/chat",
+          "query": {
+            "stream": {
+              "type": "boolean",
+              "default": false
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "copilot",
+                "openai"
+              ],
+              "optional": true
+            }
+          },
+          "description": "Chat endpoint. stream=false returns JSON; stream=true returns SSE event stream (event: saw.agent.event)."
+        },
+        {
+          "method": "POST",
+          "path": "/agent/approve",
+          "browser_path": "/api/saw/agent/approve",
+          "query": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "copilot",
+                "openai"
+              ],
+              "optional": true
+            }
+          },
+          "body": {
+            "conversation_id": "string",
+            "tool_call_id": "string",
+            "approved": "boolean"
+          },
+          "description": "Approve/deny a tool call; used by UI gating."
+        },
+        {
+          "method": "GET",
+          "path": "/agent/log",
+          "browser_path": "/api/saw/agent/log",
+          "query": {
+            "tail": {
+              "type": "integer",
+              "min": 10,
+              "max": 5000,
+              "default": 200
+            }
+          },
+          "description": "Dev-only agent ndjson tail."
+        },
+        {
+          "method": "POST",
+          "path": "/db/migrate",
+          "browser_path": "/api/saw/db/migrate",
+          "description": "Apply DB migrations."
+        },
+        {
+          "method": "POST",
+          "path": "/db/init",
+          "browser_path": "/api/saw/db/init",
+          "description": "Migrate + seed instance row if missing."
+        },
+        {
+          "method": "POST",
+          "path": "/ingest/index",
+          "browser_path": "/api/saw/ingest/index",
+          "description": "Upsert a document by uri into saw_ingest.document.",
+          "body": {
+            "uri": "string",
+            "doc_type": "string",
+            "content_text": "string",
+            "metadata_json": "object"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/embed/upsert",
+          "browser_path": "/api/saw/embed/upsert",
+          "description": "Chunk + embed content; upsert docs and missing embeddings.",
+          "body": {
+            "uri": "string",
+            "doc_type": "string",
+            "content_text": "string",
+            "metadata_json": "object",
+            "model": "string?",
+            "chunk_max_chars": "integer",
+            "chunk_overlap_chars": "integer"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/search/vector",
+          "browser_path": "/api/saw/search/vector",
+          "description": "Vector search using pgvector embeddings.",
+          "body": {
+            "query": "string",
+            "top_k": "integer",
+            "model": "string?"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/files/upload_audio_wav",
+          "browser_path": "/api/saw/files/upload_audio_wav",
+          "description": "Upload WAV file (multipart) into <workspace>/.saw/uploads and return relative path."
+        },
+        {
+          "method": "POST",
+          "path": "/audit/event",
+          "browser_path": "/api/saw/audit/event",
+          "description": "Insert an audit event (useful for DB write probe).",
+          "body": {
+            "actor": "string",
+            "event_type": "string",
+            "details_json": "object"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/patch/store_proposal",
+          "browser_path": "/api/saw/patch/store_proposal",
+          "description": "Store a unified diff proposal in DB.",
+          "body": {
+            "author": "string",
+            "diff_unified": "string",
+            "target_paths": "string[]",
+            "validation_status": "pending|passed|failed",
+            "validation_log": "string"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/patch/mark_applied",
+          "browser_path": "/api/saw/patch/mark_applied",
+          "description": "Mark patch proposal applied.",
+          "body": {
+            "proposal_id": "string",
+            "applied_commit": "string",
+            "validation_status": "pending|passed|failed",
+            "validation_log": "string"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/plugins/list",
+          "browser_path": "/api/saw/plugins/list",
+          "description": "List available plugins (stock + workspace) with IO schemas and integrity for locked plugins."
+        },
+        {
+          "method": "GET",
+          "path": "/plugins/ui/schema/{plugin_id}",
+          "browser_path": "/api/saw/plugins/ui/schema/{plugin_id}",
+          "description": "Fetch plugin UI schema (YAML) for ui.mode=schema."
+        },
+        {
+          "method": "GET",
+          "path": "/plugins/ui/bundle/{plugin_id}",
+          "browser_path": "/api/saw/plugins/ui/bundle/{plugin_id}",
+          "description": "Fetch plugin UI JS bundle for ui.mode=bundle, subject to locked/sandbox policies."
+        },
+        {
+          "method": "POST",
+          "path": "/plugins/fork",
+          "browser_path": "/api/saw/plugins/fork",
+          "description": "Fork a stock plugin into a new workspace plugin id.",
+          "body": {
+            "from_plugin_id": "string",
+            "new_plugin_id": "string",
+            "new_name": "string?"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/plugins/create_from_python",
+          "browser_path": "/api/saw/plugins/create_from_python",
+          "description": "Create a new plugin folder from raw python code + template manifest; optional probe.",
+          "body": {
+            "plugin_id": "string",
+            "name": "string",
+            "python_code": "string"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/plugins/execute",
+          "browser_path": "/api/saw/plugins/execute",
+          "description": "Execute a plugin synchronously.",
+          "body": {
+            "plugin_id": "string",
+            "inputs": "object",
+            "params": "object"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/plugins/{plugin_id}/run",
+          "browser_path": "/api/saw/api/plugins/{plugin_id}/run",
+          "description": "Spawn an async run."
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{plugin_id}/{run_id}",
+          "browser_path": "/api/saw/api/runs/{plugin_id}/{run_id}",
+          "description": "Get run status + outputs."
+        },
+        {
+          "method": "POST",
+          "path": "/api/services/{service_id}/stop",
+          "browser_path": "/api/saw/api/services/{service_id}/stop",
+          "description": "Stop a spawned service."
+        }
+      ]
+    },
+    {
+      "id": "patch_engine",
+      "base_url_env": "SAW_PATCH_ENGINE_URL",
+      "default_base_url": "http://localhost:5128",
+      "browser_base": "/api/dev",
+      "notes": [
+        "Patch Engine health is at /health on the Patch Engine origin.",
+        "Vite proxy forwards /api/dev/* without rewrite; /api/dev/health will NOT hit Patch Engine /health unless you add a rewrite rule."
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/health",
+          "description": "Patch Engine health (repo_root + allowlist)."
+        },
+        {
+          "method": "GET",
+          "path": "/api/dev/flags",
+          "browser_path": "/api/dev/flags",
+          "description": "Feature flags."
+        },
+        {
+          "method": "GET",
+          "path": "/api/dev/caps",
+          "browser_path": "/api/dev/caps",
+          "description": "Get caps manifest (.saw/caps.json)."
+        },
+        {
+          "method": "POST",
+          "path": "/api/dev/caps",
+          "browser_path": "/api/dev/caps",
+          "description": "Set caps for a path."
+        },
+        {
+          "method": "GET",
+          "path": "/api/dev/session/log",
+          "browser_path": "/api/dev/session/log",
+          "description": "Tail .saw/session.ndjson."
+        },
+        {
+          "method": "GET",
+          "path": "/api/dev/tree",
+          "browser_path": "/api/dev/tree",
+          "description": "Directory tree (blocked paths filtered)."
+        },
+        {
+          "method": "GET",
+          "path": "/api/dev/file",
+          "browser_path": "/api/dev/file",
+          "description": "Read file (caps enforced)."
+        },
+        {
+          "method": "POST",
+          "path": "/api/dev/file",
+          "browser_path": "/api/dev/file",
+          "description": "Write file (caps enforced)."
+        },
+        {
+          "method": "POST",
+          "path": "/api/dev/safe/write",
+          "browser_path": "/api/dev/safe/write",
+          "description": "Safe whole-file write (rollback on validation failure)."
+        },
+        {
+          "method": "POST",
+          "path": "/api/dev/safe/delete",
+          "browser_path": "/api/dev/safe/delete",
+          "description": "Safe delete (rollback on validation failure)."
+        },
+        {
+          "method": "POST",
+          "path": "/api/dev/safe/applyPatch",
+          "browser_path": "/api/dev/safe/applyPatch",
+          "description": "Safe apply unified diff (allowlist + caps + validation)."
+        },
+        {
+          "method": "GET",
+          "path": "/api/dev/git/status",
+          "browser_path": "/api/dev/git/status",
+          "description": "Git status + diff (optionally path-scoped)."
+        },
+        {
+          "method": "POST",
+          "path": "/api/dev/git/commit",
+          "browser_path": "/api/dev/git/commit",
+          "description": "Commit all changes with provided message."
+        }
+      ]
+    },
+    {
+      "id": "vite_openai_proxy",
+      "base_url": "same-origin",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/ai/status",
+          "description": "Whether OPENAI_API_KEY is present; returns enabled + model."
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/plan",
+          "description": "Dev-only planner endpoint (OpenAI)."
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/chat",
+          "description": "Dev-only chat endpoint (OpenAI)."
+        }
+      ]
+    }
+  ],
+  "results": [
+    {
+      "service_id": "saw_api",
+      "method": "GET",
+      "path": "/health",
+      "url": "http://localhost:5127/health",
+      "status": "fail",
+      "skip_reason": null,
+      "http_status": null,
+      "latency_ms": 3001,
+      "error": "TimeoutError: timed out"
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/api-health/report",
+      "url": "http://localhost:5127/api-health/report",
+      "status": "fail",
+      "skip_reason": null,
+      "http_status": null,
+      "latency_ms": 3003,
+      "error": "TimeoutError: timed out"
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/agent/chat",
+      "url": "http://localhost:5127/agent/chat",
+      "status": "skipped",
+      "skip_reason": "ai_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/agent/approve",
+      "url": "http://localhost:5127/agent/approve",
+      "status": "fail",
+      "skip_reason": null,
+      "http_status": 422,
+      "latency_ms": 8,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "GET",
+      "path": "/agent/log",
+      "url": "http://localhost:5127/agent/log",
+      "status": "fail",
+      "skip_reason": null,
+      "http_status": null,
+      "latency_ms": 3002,
+      "error": "TimeoutError: timed out"
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/db/migrate",
+      "url": "http://localhost:5127/db/migrate",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/db/init",
+      "url": "http://localhost:5127/db/init",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/ingest/index",
+      "url": "http://localhost:5127/ingest/index",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/embed/upsert",
+      "url": "http://localhost:5127/embed/upsert",
+      "status": "skipped",
+      "skip_reason": "ai_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/search/vector",
+      "url": "http://localhost:5127/search/vector",
+      "status": "skipped",
+      "skip_reason": "ai_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/files/upload_audio_wav",
+      "url": "http://localhost:5127/files/upload_audio_wav",
+      "status": "skipped",
+      "skip_reason": "multipart",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/audit/event",
+      "url": "http://localhost:5127/audit/event",
+      "status": "fail",
+      "skip_reason": null,
+      "http_status": null,
+      "latency_ms": 3002,
+      "error": "TimeoutError: timed out"
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/patch/store_proposal",
+      "url": "http://localhost:5127/patch/store_proposal",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/patch/mark_applied",
+      "url": "http://localhost:5127/patch/mark_applied",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "GET",
+      "path": "/plugins/list",
+      "url": "http://localhost:5127/plugins/list",
+      "status": "pass",
+      "skip_reason": null,
+      "http_status": 200,
+      "latency_ms": 966,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "GET",
+      "path": "/plugins/ui/schema/{plugin_id}",
+      "url": "http://localhost:5127/plugins/ui/schema/{plugin_id}",
+      "status": "skipped",
+      "skip_reason": "templated_path",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "GET",
+      "path": "/plugins/ui/bundle/{plugin_id}",
+      "url": "http://localhost:5127/plugins/ui/bundle/{plugin_id}",
+      "status": "skipped",
+      "skip_reason": "templated_path",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/plugins/fork",
+      "url": "http://localhost:5127/plugins/fork",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/plugins/create_from_python",
+      "url": "http://localhost:5127/plugins/create_from_python",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/plugins/execute",
+      "url": "http://localhost:5127/plugins/execute",
+      "status": "skipped",
+      "skip_reason": "plugin_exec_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/api/plugins/{plugin_id}/run",
+      "url": "http://localhost:5127/api/plugins/{plugin_id}/run",
+      "status": "skipped",
+      "skip_reason": "templated_path",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "GET",
+      "path": "/api/runs/{plugin_id}/{run_id}",
+      "url": "http://localhost:5127/api/runs/{plugin_id}/{run_id}",
+      "status": "skipped",
+      "skip_reason": "templated_path",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "saw_api",
+      "method": "POST",
+      "path": "/api/services/{service_id}/stop",
+      "url": "http://localhost:5127/api/services/{service_id}/stop",
+      "status": "skipped",
+      "skip_reason": "templated_path",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "GET",
+      "path": "/health",
+      "url": "http://localhost:5128/health",
+      "status": "pass",
+      "skip_reason": null,
+      "http_status": 200,
+      "latency_ms": 368,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "GET",
+      "path": "/api/dev/flags",
+      "url": "http://localhost:5128/api/dev/flags",
+      "status": "pass",
+      "skip_reason": null,
+      "http_status": 200,
+      "latency_ms": 44,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "GET",
+      "path": "/api/dev/caps",
+      "url": "http://localhost:5128/api/dev/caps",
+      "status": "pass",
+      "skip_reason": null,
+      "http_status": 200,
+      "latency_ms": 13,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "POST",
+      "path": "/api/dev/caps",
+      "url": "http://localhost:5128/api/dev/caps",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "GET",
+      "path": "/api/dev/session/log",
+      "url": "http://localhost:5128/api/dev/session/log",
+      "status": "pass",
+      "skip_reason": null,
+      "http_status": 200,
+      "latency_ms": 31,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "GET",
+      "path": "/api/dev/tree",
+      "url": "http://localhost:5128/api/dev/tree",
+      "status": "pass",
+      "skip_reason": null,
+      "http_status": 200,
+      "latency_ms": 651,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "GET",
+      "path": "/api/dev/file",
+      "url": "http://localhost:5128/api/dev/file",
+      "status": "fail",
+      "skip_reason": null,
+      "http_status": 422,
+      "latency_ms": 1,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "POST",
+      "path": "/api/dev/file",
+      "url": "http://localhost:5128/api/dev/file",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "POST",
+      "path": "/api/dev/safe/write",
+      "url": "http://localhost:5128/api/dev/safe/write",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "POST",
+      "path": "/api/dev/safe/delete",
+      "url": "http://localhost:5128/api/dev/safe/delete",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "POST",
+      "path": "/api/dev/safe/applyPatch",
+      "url": "http://localhost:5128/api/dev/safe/applyPatch",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "GET",
+      "path": "/api/dev/git/status",
+      "url": "http://localhost:5128/api/dev/git/status",
+      "status": "pass",
+      "skip_reason": null,
+      "http_status": 200,
+      "latency_ms": 44,
+      "error": null
+    },
+    {
+      "service_id": "patch_engine",
+      "method": "POST",
+      "path": "/api/dev/git/commit",
+      "url": "http://localhost:5128/api/dev/git/commit",
+      "status": "skipped",
+      "skip_reason": "writes_disabled",
+      "http_status": null,
+      "latency_ms": null,
+      "error": null
+    }
+  ],
+  "vector_store": {
+    "ok": true,
+    "query": "what are dogs{",
+    "method": "lexical",
+    "answer": "dogs are friends",
+    "top_uri": "dog",
+    "distance": null,
+    "document_count": 81,
+    "embeddings_by_model": [
+      {
+        "model": "text-embedding-3-small",
+        "count": 54
+      }
+    ],
+    "error": null,
+    "semantic": {
+      "attempted": false,
+      "used": false,
+      "skipped_reason": null
+    }
+  },
+  "summary": {
+    "counts": {
+      "pass": 7,
+      "fail": 6,
+      "skipped": 23
+    },
+    "total": 36,
+    "ok": false
+  },
+  "cache": {
+    "hit": false,
+    "hit_reason": null,
+    "write_requested": true,
+    "written": false,
+    "path_rel": "machine-context/api_health_report.json",
+    "error": null
+  }
+}
+,
+    "error": null
+  }
+}

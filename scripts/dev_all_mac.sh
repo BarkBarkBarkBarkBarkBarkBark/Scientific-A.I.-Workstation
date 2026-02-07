@@ -188,6 +188,10 @@ export SAW_COPILOT_LOG_LEVEL="${SAW_COPILOT_LOG_LEVEL:-info}"
 # Start the Copilot CLI transport at SAW API startup (fail fast if TLS/auth/CLI is broken).
 export SAW_COPILOT_EAGER_START="${SAW_COPILOT_EAGER_START:-1}"
 
+# Dev default: make semantic vector lookups auto-run without approval prompts.
+# Override by setting SAW_AUTO_APPROVE_VECTOR_SEARCH=0 if you want approval gating.
+export SAW_AUTO_APPROVE_VECTOR_SEARCH="${SAW_AUTO_APPROVE_VECTOR_SEARCH:-1}"
+
 # Use a wrapper so Copilot CLI runs with non-interactive-safe permissions
 # (e.g., allow tools + github.com) without changing other Node processes.
 if [[ -z "${COPILOT_CLI_PATH:-}" ]] && [[ -f "$ROOT_DIR/scripts/sub/copilot_cli_wrapper.sh" ]]; then

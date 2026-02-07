@@ -30,6 +30,12 @@ $env:SAW_PATCH_ENGINE_URL = "http://${PatchEngineHost}:${PatchEnginePort}"
 $env:SAW_REPO_ROOT = $RootDir
 $env:SAW_PATCH_APPLY_ALLOWLIST = "."
 
+# Dev default: make semantic vector lookups auto-run without approval prompts.
+# Override by setting SAW_AUTO_APPROVE_VECTOR_SEARCH=0 if you want approval gating.
+if (-not $env:SAW_AUTO_APPROVE_VECTOR_SEARCH) {
+    $env:SAW_AUTO_APPROVE_VECTOR_SEARCH = "1"
+}
+
 $jobs = @()
 
 function Cleanup {

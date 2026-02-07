@@ -204,6 +204,11 @@ class CopilotAgentManager:
 
             async def handler(invocation: ToolInvocation, *, _tool_name: str = name) -> ToolResult:
                 settings = get_settings()
+
+                def _auto_approved_write_tool(tool_name: str) -> bool:
+                    # Opt-in: avoid extra approval clicks for semantic vector lookups.
+                    return bool(settings.auto_approve_vector_search) and tool_name == "vector_search"
+
                 args = invocation.get("arguments") or {}
                 tool_call_id = invocation.get("tool_call_id")
                 session_id = invocation.get("session_id")
@@ -219,8 +224,8 @@ class CopilotAgentManager:
 
                 conv.emit(_saw_event(conv.conversation_id, "tool.call", {"id": tool_call_id, "name": _tool_name, "arguments": args}))
 
-                # Gate write tools behind explicit approval.
-                if _tool_name in WRITE_TOOLS:
+                # Gate write tools behind explicit approval (unless explicitly auto-approved).
+                if _tool_name in WRITE_TOOLS and not _auto_approved_write_tool(str(_tool_name or "")):
                     fut = asyncio.get_running_loop().create_future()
                     conv.pending[str(tool_call_id)] = fut
                     conv.emit(

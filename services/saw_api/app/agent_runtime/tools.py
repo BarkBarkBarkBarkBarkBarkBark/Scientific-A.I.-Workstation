@@ -9,9 +9,19 @@ from pydantic import ValidationError
 
 from .patch_engine_client import pe_get, pe_post
 
+from ..db import db_conn
+from ..embeddings import embed_texts
+
 from ..plugins_runtime import PluginManifest
 from ..settings import get_settings
 from .health_state import get_last_agent_error
+
+try:
+    from pgvector.psycopg import Vector
+
+    _PGVECTOR_AVAILABLE = True
+except Exception:
+    _PGVECTOR_AVAILABLE = False
 
 try:
     from .copilot_agent import copilot_enabled  # type: ignore
@@ -67,6 +77,86 @@ def tool_saw_agent_health() -> dict[str, Any]:
     }
 
 
+def tool_vector_store_stats(model: str | None = None) -> dict[str, Any]:
+    """Read-only vector store stats from Postgres (pgvector).
+
+    Safe: does not call embedding APIs.
+    """
+
+    settings = get_settings()
+    m = (model or "").strip()
+    with db_conn(settings) as conn:
+        doc_count = conn.execute("SELECT COUNT(*) FROM saw_ingest.document").fetchone()[0]
+        if m:
+            emb_rows = conn.execute(
+                "SELECT model, COUNT(*) FROM saw_ingest.embedding WHERE model=%s GROUP BY model ORDER BY model",
+                (m,),
+            ).fetchall()
+        else:
+            emb_rows = conn.execute(
+                "SELECT model, COUNT(*) FROM saw_ingest.embedding GROUP BY model ORDER BY model"
+            ).fetchall()
+    return {
+        "ok": True,
+        "document_count": int(doc_count or 0),
+        "embeddings_by_model": [{"model": str(r[0]), "count": int(r[1] or 0)} for r in (emb_rows or [])],
+    }
+
+
+def tool_vector_search(query: str, top_k: int = 8, model: str | None = None) -> dict[str, Any]:
+    """Semantic vector search against saw_ingest.embedding using pgvector.
+
+    This may call the embedding provider (OpenAI) and therefore can incur cost.
+    Treat as approval-gated by listing it as a WRITE_TOOL.
+    """
+
+    if not _PGVECTOR_AVAILABLE:
+        return {"ok": False, "error": "pgvector_not_available"}
+
+    settings = get_settings()
+    q = (query or "").strip()
+    if not q:
+        return {"ok": True, "model": (model or settings.embed_model).strip(), "hits": []}
+
+    m = (model or settings.embed_model).strip()
+    try:
+        er = embed_texts(settings, [q], model=m)
+    except Exception as exc:
+        return {"ok": False, "error": f"embed_failed: {type(exc).__name__}: {exc}"}
+    if not getattr(er, "vectors", None):
+        return {"ok": True, "model": m, "hits": []}
+
+    qv = Vector(er.vectors[0])
+    k = max(1, min(50, int(top_k or 8)))
+
+    with db_conn(settings) as conn:
+        rows = conn.execute(
+            """
+            SELECT d.uri, d.doc_type, d.content_text, d.metadata_json, (e.embedding <=> %s) AS distance
+            FROM saw_ingest.embedding e
+            JOIN saw_ingest.document d ON d.doc_id = e.doc_id
+            WHERE e.model = %s
+            ORDER BY e.embedding <=> %s
+            LIMIT %s
+            """,
+            (qv, m, qv, k),
+        ).fetchall()
+
+    hits: list[dict[str, Any]] = []
+    for (uri, doc_type, content_text, metadata_json, distance) in rows:
+        hits.append(
+            {
+                "uri": str(uri),
+                "doc_type": str(doc_type) if doc_type is not None else None,
+                "distance": float(distance),
+                "content_text": str(content_text) if content_text is not None else None,
+                "metadata_json": metadata_json if isinstance(metadata_json, dict) else None,
+            }
+        )
+
+    return {"ok": True, "model": m, "hits": hits}
+
+
 def tool_set_caps(path: str, r: bool, w: bool, d: bool) -> dict[str, Any]:
     return pe_post("/api/dev/caps", {"path": path, "caps": {"r": bool(r), "w": bool(w), "d": bool(d)}})
 
@@ -114,6 +204,7 @@ READ_TOOLS = {
     "get_todo",
     "get_agent_workspace",
     "validate_plugin_manifest",
+    "vector_store_stats",
 }
 WRITE_TOOLS = {
     "apply_patch",
@@ -123,6 +214,8 @@ WRITE_TOOLS = {
     "write_todo",
     "write_agent_workspace",
     "create_plugin",
+    # Approval-gated because it can incur embedding cost.
+    "vector_search",
 }
 
 
@@ -300,6 +393,36 @@ TOOLS: list[dict[str, Any]] = [
             "name": "saw_agent_health",
             "description": "Check SAW agent health (no network).",
             "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vector_store_stats",
+            "description": "Read-only stats about the vector store (Postgres/pgvector): document count + embeddings by model.",
+            "parameters": {
+                "type": "object",
+                "properties": {"model": {"type": "string"}},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vector_search",
+            "description": "Semantic vector search (may call embedding provider and incur cost). Approval-gated by default; can be auto-approved via SAW_AUTO_APPROVE_VECTOR_SEARCH=1.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "top_k": {"type": "integer"},
+                    "model": {"type": "string"},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
         },
     },
     {
@@ -521,6 +644,15 @@ def run_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return tool_introspection_run()
     if name == "saw_agent_health":
         return tool_saw_agent_health()
+    if name == "vector_store_stats":
+        m = args.get("model")
+        return tool_vector_store_stats(model=str(m) if isinstance(m, str) and m.strip() else None)
+    if name == "vector_search":
+        return tool_vector_search(
+            query=str(args.get("query") or ""),
+            top_k=int(args.get("top_k") or 8),
+            model=str(args.get("model") or "").strip() or None,
+        )
     if name == "get_todo":
         return tool_get_todo()
     if name == "get_agent_workspace":

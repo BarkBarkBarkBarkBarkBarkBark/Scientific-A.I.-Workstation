@@ -13,8 +13,16 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..db import sha256_text
+from ..db import db_conn, sha256_text
+from ..embeddings import embed_texts
 from ..settings import get_settings
+
+try:
+    from pgvector.psycopg import Vector
+
+    _PGVECTOR_AVAILABLE = True
+except Exception:
+    _PGVECTOR_AVAILABLE = False
 
 
 router = APIRouter(prefix="/api-health", tags=["api-health"])
@@ -194,6 +202,10 @@ class ApiHealthReportResponse(BaseModel):
     services: list[dict[str, Any]]
     results: list[ApiHealthProbeResult]
 
+    # Extra probe results that are not HTTP endpoint checks.
+    # Included in probe mode, ignored in spec mode.
+    vector_store: dict[str, Any] | None = None
+
     summary: dict[str, Any]
     cache: dict[str, Any]
 
@@ -257,6 +269,98 @@ def _write_cache(payload: dict[str, Any]) -> tuple[bool, str | None]:
         return True, None
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
+
+
+def _vector_store_smoke(*, allow_ai: bool) -> dict[str, Any]:
+    """Read-only smoke test for pgvector-backed RAG content.
+
+    Goal: ensure the health check can answer a fixed question using DB context.
+    Safe-by-default: always runs a lexical DB probe; optional semantic probe when allow_ai is true.
+    """
+
+    settings = get_settings()
+    query = "what are dogs{"  # intentionally odd: catches encoding/escaping edge cases
+
+    out: dict[str, Any] = {
+        "ok": False,
+        "query": query,
+        "method": None,
+        "answer": None,
+        "top_uri": None,
+        "distance": None,
+        "document_count": 0,
+        "embeddings_by_model": [],
+        "error": None,
+        "semantic": {"attempted": False, "used": False, "skipped_reason": None},
+    }
+
+    try:
+        with db_conn(settings) as conn:
+            doc_count = conn.execute("SELECT COUNT(*) FROM saw_ingest.document").fetchone()[0]
+            emb_rows = conn.execute(
+                "SELECT model, COUNT(*) FROM saw_ingest.embedding GROUP BY model ORDER BY model"
+            ).fetchall()
+
+            out["document_count"] = int(doc_count or 0)
+            out["embeddings_by_model"] = [
+                {"model": str(r[0]), "count": int(r[1] or 0)} for r in (emb_rows or [])
+            ]
+
+            # Safe-by-default: lexical probe (no embedding call).
+            row = conn.execute(
+                """
+                SELECT uri, content_text
+                FROM saw_ingest.document
+                WHERE content_text ILIKE %s
+                ORDER BY LENGTH(content_text) ASC
+                LIMIT 1
+                """,
+                ("%dogs%",),
+            ).fetchone()
+            if row:
+                out["method"] = "lexical"
+                out["top_uri"] = str(row[0])
+                out["answer"] = str(row[1] or "")
+
+            # Optional semantic probe: requires allow_ai + OPENAI_API_KEY + pgvector.
+            if allow_ai:
+                out["semantic"]["attempted"] = True
+                if not settings.openai_api_key:
+                    out["semantic"]["skipped_reason"] = "OPENAI_API_KEY_not_set"
+                elif not _PGVECTOR_AVAILABLE:
+                    out["semantic"]["skipped_reason"] = "pgvector_not_available"
+                else:
+                    try:
+                        er = embed_texts(settings, [query], model=settings.embed_model)
+                        if getattr(er, "vectors", None):
+                            qv = Vector(er.vectors[0])
+                            row2 = conn.execute(
+                                """
+                                SELECT d.uri, d.content_text, (e.embedding <=> %s) AS distance
+                                FROM saw_ingest.embedding e
+                                JOIN saw_ingest.document d ON d.doc_id = e.doc_id
+                                WHERE e.model = %s
+                                ORDER BY e.embedding <=> %s
+                                LIMIT 1
+                                """,
+                                (qv, settings.embed_model, qv),
+                            ).fetchone()
+                            if row2:
+                                out["method"] = "vector"
+                                out["top_uri"] = str(row2[0])
+                                out["answer"] = str(row2[1] or "")
+                                out["distance"] = float(row2[2]) if row2[2] is not None else None
+                                out["semantic"]["used"] = True
+                    except Exception as exc:
+                        out["semantic"]["skipped_reason"] = f"semantic_failed: {type(exc).__name__}: {exc}"
+
+        out["ok"] = bool(str(out.get("answer") or "").strip())
+        if not out["ok"] and out["document_count"] <= 0:
+            out["error"] = "no_documents"
+        return out
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}: {exc}"
+        return out
 
 
 @router.post("/report", response_model=ApiHealthReportResponse)
@@ -421,7 +525,13 @@ def api_health_report(req: ApiHealthReportRequest) -> ApiHealthReportResponse:
                 )
 
     summary = _summarize(results)
-    ok = bool(summary.get("ok"))
+
+    vector_store: dict[str, Any] | None = None
+    if req.mode == "probe":
+        # This is a local DB read-only probe; it does not depend on other services.
+        vector_store = _vector_store_smoke(allow_ai=bool(req.allow_ai))
+
+    ok = bool(summary.get("ok")) and (bool((vector_store or {}).get("ok")) if vector_store is not None else True)
 
     payload: dict[str, Any] = {
         "ok": ok,
@@ -431,6 +541,7 @@ def api_health_report(req: ApiHealthReportRequest) -> ApiHealthReportResponse:
         "spec_path_rel": "machine-context/api_endpoints.json",
         "services": services,
         "results": [r.model_dump() for r in results],
+        "vector_store": vector_store,
         "summary": summary,
         "cache": {
             "hit": False,

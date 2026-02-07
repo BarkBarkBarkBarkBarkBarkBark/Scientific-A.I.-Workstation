@@ -216,6 +216,11 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
                 }
             )
 
+            def _auto_approved_write_tool(tool_name: str) -> bool:
+                # Opt-in: avoid extra approval clicks for semantic vector lookups.
+                # Still default-safe: requires explicit env var SAW_AUTO_APPROVE_VECTOR_SEARCH=1.
+                return bool(settings.auto_approve_vector_search) and tool_name == "vector_search"
+
             for tc in tool_calls:
                 name = tc.function.name
                 try:
@@ -224,6 +229,43 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
                     args = {}
 
                 if name in WRITE_TOOLS:
+                    if _auto_approved_write_tool(name):
+                        # Treat as auto-run even though it's in WRITE_TOOLS by default.
+                        try:
+                            out = run_tool(name, dict(args or {}))
+                            st.messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": json.dumps(out, ensure_ascii=False)[:200000],
+                                }
+                            )
+                            append_agent_event(
+                                settings,
+                                {
+                                    "type": "agent.tool.auto_read",
+                                    "conversation_id": st.id,
+                                    "tool": {"id": str(tc.id), "name": name},
+                                },
+                            )
+                        except Exception as e:
+                            st.messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": json.dumps({"error": str(e)}),
+                                }
+                            )
+                            append_agent_event(
+                                settings,
+                                {
+                                    "type": "agent.tool.auto_read_error",
+                                    "conversation_id": st.id,
+                                    "tool": {"id": str(tc.id), "name": name},
+                                    "error": str(e)[:2000],
+                                },
+                            )
+                        continue
                     pending = PendingToolCall(id=str(tc.id), name=name, arguments=dict(args or {}), created_at_ms=now_ms())
                     st.pending = pending
                     st.updated_at_ms = now_ms()
