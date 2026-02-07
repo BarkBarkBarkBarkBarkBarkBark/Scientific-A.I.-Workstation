@@ -97,14 +97,11 @@ export async function fetchWorkspacePlugins(apiBase = 'http://127.0.0.1:5127'): 
                       action: p.utility.launch.action === 'run_plugin' ? 'run_plugin' : undefined,
                       open_target: p.utility.launch.open_target === 'new_tab' ? 'new_tab' : undefined,
                       expect:
-                        p.utility.launch.expect && typeof p.utility.launch.expect === 'object'
-                          ? {
-                              type: p.utility.launch.expect.type === 'url' ? 'url' : undefined,
-                              output_path:
-                                typeof p.utility.launch.expect.output_path === 'string'
-                                  ? p.utility.launch.expect.output_path
-                                  : undefined,
-                            }
+                        p.utility.launch.expect &&
+                        typeof p.utility.launch.expect === 'object' &&
+                        p.utility.launch.expect.type === 'url' &&
+                        typeof p.utility.launch.expect.output_path === 'string'
+                          ? { type: 'url', output_path: String(p.utility.launch.expect.output_path) }
                           : undefined,
                       app:
                         p.utility.launch.app && typeof p.utility.launch.app === 'object'

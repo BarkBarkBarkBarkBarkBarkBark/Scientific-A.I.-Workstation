@@ -9,7 +9,25 @@ import streamlit as st
 
 
 def _default_db_url() -> str:
-    return os.environ.get("SAW_DB_URL") or "postgresql://saw_app:saw_app@127.0.0.1:54329/saw"
+    # Matches dev docker-compose default port mapping (127.0.0.1:54329->5432).
+    # Prefer localhost in the display string to avoid loopback/DNS quirks.
+    return os.environ.get("SAW_DB_URL") or "postgresql://saw_app:saw_app@localhost:54329/saw"
+
+
+def _get_conn(db_url: str) -> psycopg.Connection[Any]:
+    # Streamlit reruns the script frequently; keep a single connection per session.
+    conn: psycopg.Connection[Any] | None = st.session_state.get("_db_conn")
+    url: str | None = st.session_state.get("_db_url")
+    if conn is None or url != db_url or getattr(conn, "closed", False):
+        try:
+            if conn is not None and not getattr(conn, "closed", False):
+                conn.close()
+        except Exception:
+            pass
+        conn = psycopg.connect(db_url)
+        st.session_state["_db_conn"] = conn
+        st.session_state["_db_url"] = db_url
+    return conn
 
 
 def _fetch_tables(conn: psycopg.Connection[Any]) -> list[tuple[str, str]]:
@@ -51,13 +69,16 @@ if not db_url:
     st.stop()
 
 try:
-    conn = psycopg.connect(db_url)
+    conn = _get_conn(db_url)
 except Exception as exc:
     st.error(f"Connection failed: {exc}")
     st.stop()
 
-with conn:
+try:
     tables = _fetch_tables(conn)
+except Exception as exc:
+    st.error(f"Failed to list tables: {exc}")
+    st.stop()
 
 if not tables:
     st.info("No tables found.")
@@ -71,8 +92,11 @@ schema_table = st.selectbox(
 
 schema, table = schema_table
 
-with conn:
+try:
     columns = _fetch_columns(conn, schema, table)
+except Exception as exc:
+    st.error(f"Failed to list columns: {exc}")
+    st.stop()
 
 st.caption(f"Columns: {', '.join(columns)}")
 

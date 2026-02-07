@@ -28,7 +28,6 @@ export function BottomPanel() {
   const logs = useSawStore((s) => s.logs)
   const errors = useSawStore((s) => s.errors)
   const clearErrors = useSawStore((s) => s.clearErrors)
-  const ai = useSawStore((s) => s.aiMessages)
   const openConsoleFullscreen = useSawStore((s) => s.openConsoleFullscreen)
   const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1400 : window.innerWidth))
 
@@ -38,7 +37,8 @@ export function BottomPanel() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const content = tab === 'logs' ? logs : tab === 'errors' ? errors : ai
+  const content = tab === 'errors' ? errors : logs
+  const contentView = [...content].reverse()
 
   return (
     <div className="px-2 pb-2">
@@ -62,9 +62,6 @@ export function BottomPanel() {
                 Clear
               </button>
             )}
-            <TabButton active={tab === 'ai'} onClick={() => setTab('ai')}>
-              AI Suggestions
-            </TabButton>
             <TabButton active={tab === 'todo'} onClick={() => setTab('todo')}>
               Todo
             </TabButton>
@@ -98,7 +95,7 @@ export function BottomPanel() {
           ) : (
             <div className="h-full overflow-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
               <pre className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-zinc-200">
-                {content.join('\n')}
+                {contentView.join('\n')}
               </pre>
             </div>
           )}

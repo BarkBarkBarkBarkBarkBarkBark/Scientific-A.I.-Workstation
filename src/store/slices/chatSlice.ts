@@ -151,7 +151,7 @@ export function createChatSlice(
 
       set({ chatBusy: true })
       set((s) => ({
-        bottomTab: 'chat',
+        bottomTab: 'logs',
         chat: { ...s.chat, messages: [...s.chat.messages, { role: 'user', content }] },
         logs: [...s.logs, '[chat] user message'],
       }))

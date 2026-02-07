@@ -27,7 +27,7 @@ export function createAiSlice(
       set({ aiBusy: true })
       set((s) => ({
         goalText: goal,
-        bottomTab: 'ai',
+        bottomTab: 'logs',
         logs: [...s.logs, '[planner] generating plan...'],
       }))
 
@@ -42,7 +42,7 @@ export function createAiSlice(
         const fallback = generatePlanFallback(goal, get().pluginCatalog)
         plan = fallback
         set((s) => ({
-          bottomTab: 'ai',
+          bottomTab: 'logs',
           logs: [...s.logs, `[planner] openai unavailable; using local fallback (${String(e?.message ?? e)})`],
         }))
       } finally {

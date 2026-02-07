@@ -14,7 +14,7 @@ export function createPatchReviewSlice(
         set((s) => ({ patchReview: { ...s.patchReview, lastError: `PatchProposal parse failed: ${parsed.error}` } }))
         return
       }
-      set({ patchReview: { open: true, busy: false, proposal: parsed.proposal, lastError: '' }, bottomTab: 'chat' })
+      set({ patchReview: { open: true, busy: false, proposal: parsed.proposal, lastError: '' }, bottomTab: 'logs' })
     },
 
     closePatchReview: () => set({ patchReview: { open: false, busy: false, proposal: null, lastError: '' } }),

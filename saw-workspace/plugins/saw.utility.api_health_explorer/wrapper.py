@@ -12,7 +12,11 @@ from pathlib import Path
 
 
 def _workspace_root(plugin_dir: Path) -> Path:
-    return Path(os.environ.get("SAW_WORKSPACE_ROOT") or plugin_dir.parents[2]).resolve()
+    env = os.environ.get("SAW_WORKSPACE_ROOT")
+    if env:
+        return Path(env).resolve()
+    # wrapper.py is at saw-workspace/plugins/<id>/wrapper.py
+    return (plugin_dir / ".." / "..").resolve()
 
 
 def _choose_free_port(host: str, port_range: tuple[int, int]) -> int:
@@ -83,11 +87,13 @@ def _launch_streamlit(app_file: Path, host: str, port: int, env: dict) -> None:
 def main(inputs: dict, params: dict, context) -> dict:
     plugin_dir = Path(__file__).resolve().parent
     workspace_root = _workspace_root(plugin_dir)
-    host = "127.0.0.1"
+    # Prefer hostnames for human-facing URLs.
+    streamlit_host = "localhost"
+    port_probe_host = "127.0.0.1"
     port_range = (8780, 8869)
 
     params = params or {}
-    api_url = str(params.get("api_url") or "").strip() or os.environ.get("SAW_API_URL") or "http://127.0.0.1:5127"
+    api_url = str(params.get("api_url") or "").strip() or os.environ.get("SAW_API_URL") or "http://localhost:5127"
 
     state_path = _state_path(workspace_root, "saw.utility.api_health_explorer")
     state = _load_state(state_path)
@@ -96,14 +102,14 @@ def main(inputs: dict, params: dict, context) -> dict:
     if url and _healthcheck(url + "/_stcore/health"):
         context.log("info", "api_health_explorer:reuse", url=url)
     else:
-        port = _choose_free_port(host, port_range)
-        url = f"http://{host}:{port}"
+        port = _choose_free_port(port_probe_host, port_range)
+        url = f"http://{streamlit_host}:{port}"
         env = dict(os.environ)
         env["SAW_WORKSPACE_ROOT"] = str(workspace_root)
         env["SAW_API_URL"] = api_url
 
         app_file = plugin_dir / "streamlit_app.py"
-        _launch_streamlit(app_file, host, port, env)
+        _launch_streamlit(app_file, streamlit_host, port, env)
 
         time.sleep(0.2)
         _save_state(state_path, {"url": url, "port": port, "api_url": api_url})

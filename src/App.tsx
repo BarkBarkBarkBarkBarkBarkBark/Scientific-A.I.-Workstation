@@ -3,7 +3,6 @@ import { LeftSidebar } from './components/LeftSidebar'
 import { NodeCanvas } from './components/NodeCanvas'
 import { Inspector } from './components/Inspector'
 import { BottomPanel } from './components/BottomPanel'
-import { GoalBox } from './components/GoalBox'
 import { useEffect, useState } from 'react'
 import { useSawStore } from './store/useSawStore'
 import { ResizableDivider } from './components/ui/ResizableDivider'
@@ -84,11 +83,10 @@ export function App() {
         <div className="min-w-0 flex-1">
           {/*
             Max bottom height is basically "almost full screen".
-            (Top bar + goal box + paddings leave ~160px.)
+            (Top bar + paddings leave ~160px.)
           */}
-          <div className="grid h-full gap-0" style={{ gridTemplateRows: `48px auto 1fr 12px ${layout.bottomHeight}px` }}>
+          <div className="grid h-full gap-0" style={{ gridTemplateRows: `48px 1fr 12px ${layout.bottomHeight}px` }}>
             <TopBar />
-            <GoalBox />
 
             <div className="min-h-0 px-2 py-2">
               <div

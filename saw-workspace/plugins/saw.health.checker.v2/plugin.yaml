@@ -1,8 +1,8 @@
 id: saw.health.checker.v2
-name: API Health Checker (api_endpoints.json)
+name: API Health Checker (via /api-health/report)
 version: 0.1.1
-description: Probe SAW API endpoints defined in machine-context/api_endpoints.json
-  and report reachability/latency. Defaults to that file as single source of truth.
+description: Delegates to the SAW API single canonical health endpoint (POST /api-health/report)
+  and returns a structured report (safe-by-default probing + optional cache artifact).
 category_path: devtools/health
 entrypoint:
   file: wrapper.py
@@ -15,33 +15,18 @@ inputs:
     type: path
     default: machine-context/api_endpoints.json
     ui:
-      label: api_endpoints.json (workspace-relative)
+      label: (deprecated) api_endpoints.json
 params:
   timeout_sec:
     type: number
     default: 3
     ui:
       label: Timeout (seconds)
-  frontend_url:
+  saw_api_url:
     type: string
-    default: http://127.0.0.1:5173
+    default: http://localhost:5127
     ui:
-      label: Frontend (Vite) base URL (for /api/ai/*)
-  sample_plugin_id:
-    type: string
-    default: saw.template.plugin
-    ui:
-      label: Sample plugin id for {plugin_id} paths
-  sample_run_id:
-    type: string
-    default: does_not_exist
-    ui:
-      label: Sample run id for {run_id} paths
-  sample_service_id:
-    type: string
-    default: does_not_exist
-    ui:
-      label: Sample service id for {service_id} paths
+      label: SAW API base URL
   allow_ai:
     type: string
     default: 'false'
@@ -57,9 +42,33 @@ params:
     default: 'false'
     ui:
       label: Allow plugin-execution endpoints (true/false)
+  allow_benign_writes:
+    type: string
+    default: 'true'
+    ui:
+      label: Allow benign writes (audit/event)
+  use_cache:
+    type: string
+    default: 'true'
+    ui:
+      label: Use cached report when fresh
+  max_age_sec:
+    type: number
+    default: 30
+    ui:
+      label: Cache max age (seconds)
+  write_cache:
+    type: string
+    default: 'true'
+    ui:
+      label: Write cache artifact (api_health_report.json)
 outputs:
+  ok:
+    type: boolean
   report:
     type: object
+  error:
+    type: string
 execution:
   deterministic: false
   cacheable: false

@@ -1,11 +1,10 @@
-"""SAW Plugin: API Health Checker
+"""SAW Plugin: API Health Checker (v2)
 
-Reads saw-workspace/machine-context/api_endpoints.json (by default) and probes each listed endpoint.
+This v2 checker is intentionally thin: it delegates to the SAW API's single canonical
+endpoint at POST /api-health/report.
 
-This is a "safe by default" health checker: it will skip endpoints that are likely to incur
-costs or side effects (AI calls, writes, plugin execution) unless enabled via params.
-
-Outputs a structured report with per-endpoint status and latency.
+The SAW API endpoint implements safe-by-default probing and can also write a cached
+machine-context report artifact.
 """
 
 from __future__ import annotations
@@ -13,212 +12,108 @@ from __future__ import annotations
 import json
 import os
 import time
-import uuid
 import urllib.error
 import urllib.request
 from typing import Any
-
-
-def _workspace_root() -> str:
-    env = os.environ.get("SAW_WORKSPACE_ROOT")
-    if env:
-        return os.path.abspath(env)
-    here = os.path.dirname(__file__)
-    # wrapper.py is at saw-workspace/plugins/<id>/wrapper.py
-    return os.path.abspath(os.path.join(here, "..", ".."))
-
-
-def _safe_join_under(root: str, rel: str) -> str:
-    rel = (rel or "").replace("\\", "/").strip()
-    if not rel:
-        raise ValueError("missing_path")
-    if rel.startswith("/") or rel.startswith("~"):
-        raise ValueError("path must be workspace-relative")
-    if rel.startswith("..") or "/../" in f"/{rel}/":
-        raise ValueError("path traversal is not allowed")
-    abs_path = os.path.abspath(os.path.join(root, rel))
-    root_abs = os.path.abspath(root)
-    if not abs_path.startswith(root_abs):
-        raise ValueError("path must be inside saw-workspace/")
-    return abs_path
 
 
 def _truthy(s: Any) -> bool:
     return str(s or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def _join_url(base_url: str, path: str) -> str:
-    b = (base_url or "").rstrip("/")
-    p = (path or "")
-    if not p.startswith("/"):
-        p = "/" + p
-    return b + p
-
-
-def _substitute_path(path: str, mapping: dict[str, str]) -> str:
-    out = path
-    for k, v in mapping.items():
-        out = out.replace("{" + k + "}", str(v))
-    return out
-
-
-def _sample_value(type_str: str) -> Any:
-    t = (type_str or "").strip()
-    if t.endswith("?"):
-        return None
-    if t == "string":
-        return "health_check"
-    if t == "boolean":
-        return False
-    if t in ("integer", "number"):
-        return 1
-    if t == "object":
-        return {}
-    if t == "string[]":
-        return ["health_check"]
-    return "health_check"
-
-
-def _sample_body(body_spec: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not body_spec:
-        return {}
-    out: dict[str, Any] = {}
-    for k, v in body_spec.items():
-        if isinstance(v, str):
-            val = _sample_value(v)
-            if val is not None:
-                out[str(k)] = val
-        elif isinstance(v, dict):
-            t = str(v.get("type") or "object")
-            val = _sample_value(t)
-            if val is not None:
-                out[str(k)] = val
-        else:
-            out[str(k)] = "health_check"
-    if "nonce" in out and isinstance(out.get("nonce"), str):
-        out["nonce"] = str(uuid.uuid4())
-    return out
-
-
-def _http_request(
-    method: str, url: str, body: dict[str, Any] | None, timeout_sec: float
-) -> tuple[int | None, str, int, str | None]:
-    headers = {"Accept": "application/json"}
-    data = None
-    if body is not None and method.upper() not in ("GET", "HEAD"):
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-
-    req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
-    start = time.time()
+def _post_json(url: str, payload: dict[str, Any], timeout_sec: float) -> tuple[int | None, Any, str | None]:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
             status = int(getattr(resp, "status", 0) or 0)
-            raw = resp.read(64 * 1024)
+            raw = resp.read(2 * 1024 * 1024)
             text = raw.decode("utf-8", errors="replace")
-            dur_ms = int(max(0.0, (time.time() - start) * 1000.0))
-            return status, text, dur_ms, None
+            try:
+                return status, json.loads(text or "null"), None
+            except Exception:
+                return status, {"error": "non_json_response", "text": text}, None
     except urllib.error.HTTPError as e:
         status = int(getattr(e, "code", 0) or 0)
         raw = b""
         try:
-            raw = e.read(64 * 1024) or b""
+            raw = e.read(2 * 1024 * 1024) or b""
         except Exception:
             pass
         text = raw.decode("utf-8", errors="replace")
-        dur_ms = int(max(0.0, (time.time() - start) * 1000.0))
-        return status, text, dur_ms, None
-    except Exception as e:
-        dur_ms = int(max(0.0, (time.time() - start) * 1000.0))
-        return None, "", dur_ms, f"{type(e).__name__}: {e}"
-
-
-def _is_ai_endpoint(service_id: str, path: str) -> bool:
-    if service_id == "vite_openai_proxy":
-        return path != "/api/ai/status"
-    if path.startswith("/agent/chat"):
-        return True
-    if path.startswith("/embed/") or path.startswith("/search/"):
-        return True
-    return False
-
-
-def _is_writey_endpoint(path: str, method: str) -> bool:
-    m = method.upper()
-    if m == "GET":
-        return False
-    if path.startswith("/db/"):
-        return True
-    if path.startswith("/ingest/"):
-        return True
-    if path.startswith("/embed/upsert"):
-        return True
-    if path.startswith("/audit/"):
-        return True
-    if path.startswith("/patch/"):
-        return True
-    if "/plugins/create_from_python" in path or path.endswith("/plugins/fork"):
-        return True
-    if path.endswith("/plugins/execute"):
-        return True
-    if path.startswith("/api/plugins/") and path.endswith("/run"):
-        return True
-    if path.startswith("/api/services/") and path.endswith("/stop"):
-        return True
-    if path.startswith("/api/dev/") and m in ("POST", "PUT", "DELETE", "PATCH"):
-        return True
-    return False
-
-
-def _is_plugin_exec_endpoint(path: str) -> bool:
-    return path.endswith("/plugins/execute") or (
-        path.startswith("/api/plugins/") and path.endswith("/run")
-    )
+        try:
+            return status, json.loads(text or "null"), None
+        except Exception:
+            return status, {"error": "http_error", "status_code": status, "text": text}, None
+    except Exception as exc:
+        return None, None, f"{type(exc).__name__}: {exc}"
 
 
 def main(inputs: dict, params: dict, context) -> dict:
     started = time.time()
 
-    endpoints_rel = str(
-        ((inputs or {}).get("endpoints_json") or {}).get("data")
-        or "machine-context/api_endpoints.json"
-    ).strip()
-
     timeout_sec = float((params or {}).get("timeout_sec") or 3)
     timeout_sec = max(0.5, min(60.0, timeout_sec))
-
-    frontend_url = str((params or {}).get("frontend_url") or "http://127.0.0.1:5173").strip()
 
     allow_ai = _truthy((params or {}).get("allow_ai"))
     allow_writes = _truthy((params or {}).get("allow_writes"))
     allow_plugins = _truthy((params or {}).get("allow_plugins"))
+    allow_benign_writes = _truthy((params or {}).get("allow_benign_writes"))
+    # default: benign writes are allowed
+    if "allow_benign_writes" not in (params or {}):
+        allow_benign_writes = True
 
-    sample_plugin_id = str((params or {}).get("sample_plugin_id") or "saw.template.plugin").strip()
-    sample_run_id = str((params or {}).get("sample_run_id") or "does_not_exist").strip()
-    sample_service_id = str((params or {}).get("sample_service_id") or "does_not_exist").strip()
+    use_cache = _truthy((params or {}).get("use_cache"))
+    if "use_cache" not in (params or {}):
+        use_cache = True
+    max_age_sec = int((params or {}).get("max_age_sec") or 30)
+    max_age_sec = max(0, min(3600, max_age_sec))
 
-    ws_root = _workspace_root()
-    endpoints_path = _safe_join_under(ws_root, endpoints_rel)
+    write_cache = _truthy((params or {}).get("write_cache"))
+    if "write_cache" not in (params or {}):
+        write_cache = True
 
-    spec = json.loads(open(endpoints_path, "r", encoding="utf-8").read() or "{}")
-    services = spec.get("services") or []
+    saw_api_url = str((params or {}).get("saw_api_url") or os.environ.get("SAW_API_URL") or "http://localhost:5127").strip()
 
-    subs = {
-        "plugin_id": sample_plugin_id,
-        "run_id": sample_run_id,
-        "service_id": sample_service_id,
+    payload = {
+        "mode": "probe",
+        "allow_ai": allow_ai,
+        "allow_writes": allow_writes,
+        "allow_plugins": allow_plugins,
+        "allow_benign_writes": allow_benign_writes,
+        "timeout_sec": timeout_sec,
+        "use_cache": use_cache,
+        "max_age_sec": max_age_sec,
+        "write_cache": write_cache,
     }
 
     context.log(
         "info",
-        "health_checker:start",
-        endpoints_json=endpoints_rel,
-        services=len(services),
-        allow_ai=allow_ai,
-        allow_writes=allow_writes,
-        allow_plugins=allow_plugins,
-        timeout_sec=timeout_sec,
+        "health_checker_v2:start",
+        saw_api_url=saw_api_url,
+        payload=payload,
     )
+
+    report_url = saw_api_url.rstrip("/") + "/api-health/report"
+    status, data, err = _post_json(report_url, payload, timeout_sec=float(timeout_sec) + 10.0)
+    dur_ms = int(max(0.0, (time.time() - started) * 1000.0))
+    if err is not None:
+        context.log("error", "health_checker_v2:failed", error=err)
+        return {
+            "ok": {"data": False, "metadata": {"duration_ms": dur_ms}},
+            "error": {"data": err, "metadata": {"duration_ms": dur_ms}},
+        }
+
+    ok = bool(data.get("ok")) if isinstance(data, dict) else False
+    return {
+        "ok": {"data": ok, "metadata": {"duration_ms": dur_ms, "http_status": status}},
+        "report": {"data": data, "metadata": {"duration_ms": dur_ms, "http_status": status}},
+    }
 
     results: list[dict[str, Any]] = []
     totals = {"pass": 0, "warn": 0, "fail": 0, "skipped": 0}

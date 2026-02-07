@@ -7,21 +7,21 @@
   },
   "service_defaults": {
     "frontend_vite": { "default_port": 5173 },
-    "saw_api": { "default_url": "http://127.0.0.1:5127" },
-    "patch_engine": { "default_url": "http://127.0.0.1:5128" },
+    "saw_api": { "default_url": "http://localhost:5127" },
+    "patch_engine": { "default_url": "http://localhost:5128" },
     "copilot_cli": { "env": "SAW_COPILOT_CLI_URL" }
   },
   "vite_proxies": [
     {
       "prefix": "/api/saw",
       "target_env": "SAW_API_URL",
-      "default_target": "http://127.0.0.1:5127",
+      "default_target": "http://localhost:5127",
       "rewrite": "strip_prefix:/api/saw"
     },
     {
       "prefix": "/api/dev",
       "target_env": "SAW_PATCH_ENGINE_URL",
-      "default_target": "http://127.0.0.1:5128",
+      "default_target": "http://localhost:5128",
       "rewrite": "none"
     }
   ],
@@ -29,7 +29,7 @@
     {
       "id": "saw_api",
       "base_url_env": "SAW_API_URL",
-      "default_base_url": "http://127.0.0.1:5127",
+      "default_base_url": "http://localhost:5127",
       "browser_base": "/api/saw",
       "endpoints": [
         {
@@ -37,6 +37,25 @@
           "path": "/health",
           "browser_path": "/api/saw/health",
           "description": "Overall health (db_ok/db_error, openai_enabled, copilot_available/copilot_ok + copilot detail)."
+        },
+        {
+          "method": "POST",
+          "path": "/api-health/report",
+          "browser_path": "/api/saw/api-health/report",
+          "description": "Single canonical API health report endpoint (safe-by-default probes + optional cache artifact).",
+          "body": {
+            "mode": "spec|probe",
+            "include_services": "string[]?",
+            "allow_ai": "boolean",
+            "allow_writes": "boolean",
+            "allow_plugins": "boolean",
+            "allow_benign_writes": "boolean",
+            "timeout_sec": "number",
+            "prefer_localhost": "boolean",
+            "use_cache": "boolean",
+            "max_age_sec": "integer",
+            "write_cache": "boolean"
+          }
         },
         {
           "method": "POST",
@@ -210,7 +229,7 @@
     {
       "id": "patch_engine",
       "base_url_env": "SAW_PATCH_ENGINE_URL",
-      "default_base_url": "http://127.0.0.1:5128",
+      "default_base_url": "http://localhost:5128",
       "browser_base": "/api/dev",
       "notes": [
         "Patch Engine health is at /health on the Patch Engine origin.",

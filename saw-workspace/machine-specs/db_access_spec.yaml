@@ -1,0 +1,222 @@
+{
+  "spec": "saw_accessibility_recs.v1",
+  "goals": [
+    "Expose a database schema/relationship graph over HTTP for programmatic consumption (agent + UI utilities).",
+    "Make DB contents available for RAG using the existing pgvector-backed tables (saw_ingest.document, saw_ingest.embedding)."
+  ],
+  "current_state_observations": {
+    "utilities_menu_discovery": {
+      "code": "src/components/TopBar.tsx",
+      "rule": "plugin.utility.kind == 'external_tab' in saw-workspace/plugins/**/plugin.yaml"
+    },
+    "repo_graph_endpoint_exists": {
+      "endpoint": "GET /repo-intel/simple-graph",
+      "impl": "services/saw_api/app/repo_intel/router.py"
+    },
+    "rag_storage_already_present": {
+      "migration": "services/saw_api/migrations/001_init.sql",
+      "tables": [
+        "saw_ingest.document(uri, doc_type, content_hash, content_text, metadata_json, created_at)",
+        "saw_ingest.embedding(doc_id, model, dims, embedding)"
+      ]
+    }
+  },
+  "recommendations": [
+    {
+      "id": "api.db_intel.graph",
+      "priority": "P0",
+      "type": "api_endpoint",
+      "proposed": {
+        "method": "GET",
+        "path": "/db-intel/graph",
+        "query": {
+          "schemas": {
+            "type": "array[string]",
+            "default": ["public", "saw_ingest", "saw_ops", "saw_meta", "repo_intel"]
+          },
+          "include_columns": { "type": "boolean", "default": false }
+        },
+        "response": {
+          "content_type": "application/json",
+          "shape": {
+            "nodes": [
+              {
+                "id": "string",
+                "kind": "schema|table|column",
+                "schema": "string",
+                "table": "string",
+                "column": "string",
+                "data_type": "string"
+              }
+            ],
+            "edges": [
+              {
+                "src": "string",
+                "dst": "string",
+                "kind": "foreign_key|has_column"
+              }
+            ],
+            "stats": {
+              "schema_count": "number",
+              "table_count": "number",
+              "fk_count": "number",
+              "column_count": "number"
+            }
+          }
+        }
+      },
+      "implementation_notes": {
+        "where": "services/saw_api/app/db_intel/router.py (new) + include router in services/saw_api/app/main.py",
+        "how": [
+          "Query pg_catalog + information_schema for tables/columns.",
+          "Query foreign keys via pg_constraint / pg_attribute joins.",
+          "Return stable node IDs like 'table:schema.table' and 'col:schema.table.column'."
+        ]
+      },
+      "safety": {
+        "exposure": "local-dev only",
+        "controls": [
+          "allowlist schemas parameter (default to SAW schemas only)",
+          "cap output sizes (max tables/columns)",
+          "never return row data from this endpoint"
+        ]
+      }
+    },
+    {
+      "id": "api.db_intel.health",
+      "priority": "P0",
+      "type": "api_endpoint",
+      "proposed": {
+        "method": "GET",
+        "path": "/db-intel/health",
+        "response": {
+          "shape": {
+            "ok": "boolean",
+            "db_url_redacted": "string",
+            "server_version": "string",
+            "now": "string"
+          }
+        }
+      },
+      "implementation_notes": {
+        "how": [
+          "Use existing db_conn() from services/saw_api/app/db.py",
+          "Run 'select 1' and optionally 'show server_version'"
+        ]
+      }
+    },
+    {
+      "id": "api.rag.ingest_db",
+      "priority": "P0",
+      "type": "api_endpoint",
+      "proposed": {
+        "method": "POST",
+        "path": "/rag/ingest/db",
+        "body": {
+          "schemas": ["public"],
+          "tables": ["optional list; empty => none"],
+          "where_sql": "optional, must be parameterized/validated or disallowed",
+          "row_limit_per_table": 1000,
+          "text_template": "optional; default 'schema.table\\n<json row>'",
+          "doc_uri_prefix": "db://",
+          "embed_model": "default from SAW_EMBED_MODEL",
+          "chunking": { "max_chars": 4000, "overlap": 300 }
+        },
+        "response": {
+          "shape": {
+            "ok": "boolean",
+            "inserted_docs": "number",
+            "embedded_chunks": "number",
+            "skipped_existing": "number",
+            "tables_processed": ["string"]
+          }
+        }
+      },
+      "implementation_notes": {
+        "where": "services/saw_api/app/rag/router.py (new) + include in main.py",
+        "how": [
+          "Extract rows via psycopg using server-side cursor / fetchmany.",
+          "Create saw_ingest.document rows with deterministic uri (db://schema/table/primaryKey or row_hash).",
+          "Compute content_hash to dedupe updates.",
+          "Embed via services/saw_api/app/embeddings.py (already exists).",
+          "Store in saw_ingest.embedding with dims inferred from returned vector length."
+        ]
+      },
+      "safety": {
+        "controls": [
+          "require explicit table allowlist in request (no default 'dump everything')",
+          "hard caps: max_tables, max_rows_total, max_bytes_total",
+          "exclude secrets by default: columns matching /(password|secret|token|key)/i unless explicitly opted-in"
+        ]
+      }
+    },
+    {
+      "id": "api.rag.search",
+      "priority": "P0",
+      "type": "api_endpoint",
+      "proposed": {
+        "method": "GET",
+        "path": "/rag/search",
+        "query": {
+          "q": "string",
+          "k": { "type": "number", "default": 8, "max": 50 },
+          "doc_type": { "type": "string", "default": "" },
+          "uri_prefix": { "type": "string", "default": "" }
+        },
+        "response": {
+          "shape": {
+            "ok": "boolean",
+            "model": "string",
+            "results": [
+              {
+                "uri": "string",
+                "doc_type": "string",
+                "score": "number",
+                "snippet": "string",
+                "metadata_json": "object"
+              }
+            ]
+          }
+        }
+      },
+      "implementation_notes": {
+        "how": [
+          "Embed query text using embeddings.embed_texts()",
+          "Vector search in Postgres using pgvector operator (<=> for cosine distance depending on index ops) against saw_ingest.embedding",
+          "Join to saw_ingest.document to return content/snippet + metadata"
+        ]
+      }
+    },
+    {
+      "id": "machine_context.db_intel_cache",
+      "priority": "P1",
+      "type": "machine_context_file",
+      "proposed": {
+        "path": "saw-workspace/machine-context/db_intel.json",
+        "producer": "SAW API endpoint or utility plugin",
+        "shape": {
+          "generated_at": "string",
+          "db_schema_graph": "same as /db-intel/graph response",
+          "rag_stats": { "doc_count": "number", "embedding_count": "number", "models": ["string"] }
+        }
+      },
+      "rationale": "Lets the agent reason about DB structure without repeated catalog queries; mirrors the pattern used by api_endpoints.json."
+    },
+    {
+      "id": "utilities.api_health_explorer.upgrade",
+      "priority": "P1",
+      "type": "utility_plugin_update",
+      "target": "saw-workspace/plugins/saw.utility.api_health_explorer",
+      "proposed_changes": [
+        "Add buttons to call /db-intel/health and /db-intel/graph and display results.",
+        "Add a 'RAG status' panel that calls /rag/search (dry-run) or a dedicated /rag/stats endpoint."
+      ]
+    }
+  ],
+  "next_step_question": {
+    "need_from_you": [
+      "Should /rag/ingest/db be read-only extraction into saw_ingest.*, or also allow writing back to DB (I recommend read-only)?",
+      "Which schemas/tables are in-scope for RAG by default (public only, or include repo_intel + saw_ops too)?"
+    ]
+  }
+}

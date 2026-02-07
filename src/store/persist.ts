@@ -6,6 +6,11 @@ export function installLocalStoragePersist<TState extends any>(store: StoreApi<T
     const KEY = '__SAW_PERSIST__'
     if (typeof window === 'undefined' || !window.localStorage) return
 
+    const normalizeBottomTab = (tab: any) => {
+      if (tab === 'ai') return 'logs'
+      return tab
+    }
+
     const raw = window.localStorage.getItem(KEY)
     if (raw) {
       const j = JSON.parse(raw) as any
@@ -18,7 +23,7 @@ export function installLocalStoragePersist<TState extends any>(store: StoreApi<T
           logs: j.logs ?? cur.logs,
           errors: j.errors ?? cur.errors,
           errorLog: j.errorLog ?? cur.errorLog,
-          bottomTab: j.bottomTab ?? cur.bottomTab,
+          bottomTab: normalizeBottomTab(j.bottomTab) ?? cur.bottomTab,
           leftSidebarTab: j.leftSidebarTab ?? cur.leftSidebarTab,
         } as any,
         false,
@@ -34,7 +39,7 @@ export function installLocalStoragePersist<TState extends any>(store: StoreApi<T
           logs: (s.logs ?? []).slice(-120),
           errors: (s.errors ?? []).slice(-120),
           errorLog: (s.errorLog ?? []).slice(-200),
-          bottomTab: s.bottomTab,
+          bottomTab: normalizeBottomTab(s.bottomTab),
           leftSidebarTab: s.leftSidebarTab,
         }),
       )

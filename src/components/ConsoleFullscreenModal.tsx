@@ -29,7 +29,6 @@ export function ConsoleFullscreenModal() {
   const setTab = useSawStore((s) => s.setBottomTab)
   const logs = useSawStore((s) => s.logs)
   const errors = useSawStore((s) => s.errors)
-  const ai = useSawStore((s) => s.aiMessages)
 
   useEffect(() => {
     if (!open) return
@@ -42,7 +41,8 @@ export function ConsoleFullscreenModal() {
 
   if (!open) return null
 
-  const content = tab === 'logs' ? logs : tab === 'errors' ? errors : ai
+  const content = tab === 'errors' ? errors : logs
+  const contentView = [...content].reverse()
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/70 p-4">
@@ -56,9 +56,6 @@ export function ConsoleFullscreenModal() {
               </TabButton>
               <TabButton active={tab === 'errors'} onClick={() => setTab('errors')}>
                 Errors
-              </TabButton>
-              <TabButton active={tab === 'ai'} onClick={() => setTab('ai')}>
-                AI Suggestions
               </TabButton>
               <TabButton active={tab === 'todo'} onClick={() => setTab('todo')}>
                 Todo
@@ -93,7 +90,7 @@ export function ConsoleFullscreenModal() {
           ) : (
             <div className="h-full overflow-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
               <pre className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-zinc-200">
-                {content.join('\n')}
+                {contentView.join('\n')}
               </pre>
             </div>
           )}

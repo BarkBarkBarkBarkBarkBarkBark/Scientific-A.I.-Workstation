@@ -5,7 +5,7 @@ import type { AgentToolCall, ChatMessage } from '../ai/client'
 import type { PatchProposal } from '../types/patch'
 import type { DeclarativeUiDevSnapshot } from './slices/declarative_uiDevSlice'
 
-export type BottomTab = 'logs' | 'errors' | 'ai' | 'chat' | 'dev' | 'todo' | 'terminal'
+export type BottomTab = 'logs' | 'errors' | 'chat' | 'dev' | 'todo' | 'terminal'
 export type LayoutMode = 'pipeline' | 'graph'
 export type LeftSidebarTab = 'plugins' | 'files'
 

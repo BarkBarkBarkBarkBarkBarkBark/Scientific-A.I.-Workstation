@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -10,30 +9,44 @@ import streamlit as st
 
 
 def _workspace_root() -> Path:
-    return Path(os.environ.get("SAW_WORKSPACE_ROOT") or Path.cwd()).resolve()
+    env = os.environ.get("SAW_WORKSPACE_ROOT")
+    if env:
+        return Path(env).resolve()
+    # Fallback: streamlit runs with cwd=plugin dir; go up to saw-workspace.
+    here = Path(__file__).resolve().parent
+    return (here / ".." / "..").resolve()
 
 
 def _api_url() -> str:
-    return os.environ.get("SAW_API_URL") or "http://127.0.0.1:5127"
+    return os.environ.get("SAW_API_URL") or "http://localhost:5127"
 
 
-def _load_endpoints() -> dict[str, Any]:
-    root = _workspace_root()
-    path = root / "machine-context" / "api_endpoints.json"
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+def _load_endpoints_from_api(api_url: str) -> dict[str, Any]:
+    url = api_url.rstrip("/") + "/api-health/report"
+    try:
+        resp = requests.post(url, json={"mode": "spec", "use_cache": True}, timeout=15)
+        if resp.status_code >= 400:
+            return {"error": f"http_{resp.status_code}", "text": resp.text}
+        return resp.json() or {}
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 st.set_page_config(page_title="SAW API Health Explorer", layout="wide")
 st.title("API Health Explorer")
 
 api_url = st.sidebar.text_input("SAW API URL", value=_api_url())
-endpoints_doc = _load_endpoints()
+endpoints_doc = _load_endpoints_from_api(api_url)
 services = endpoints_doc.get("services") or []
 
 if not services:
-    st.warning("No API endpoints found in machine-context/api_endpoints.json")
+    err = endpoints_doc.get("error")
+    if err:
+        st.error(f"Failed to load API endpoints via /api-health/report: {err}")
+        if endpoints_doc.get("text"):
+            st.text(endpoints_doc.get("text"))
+    else:
+        st.warning("No API endpoints found via /api-health/report")
     st.stop()
 
 service_ids = [s.get("id") for s in services]
@@ -90,5 +103,8 @@ st.markdown("---")
 st.subheader("Quick links")
 link_base = api_url.rstrip("/")
 if browser_path:
-    st.markdown(f"[Open in browser]({browser_path})")
+    href = browser_path
+    if isinstance(browser_path, str) and browser_path.startswith("/"):
+        href = f"{link_base}{browser_path}"
+    st.markdown(f"[Open in browser]({href})")
     st.code(f"curl -X {method} '{link_base}{path}'", language="bash")

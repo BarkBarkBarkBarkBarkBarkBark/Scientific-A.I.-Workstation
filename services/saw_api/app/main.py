@@ -30,6 +30,7 @@ from .agent_runtime.core import agent_model
 from .agent_runtime.health_state import get_last_agent_error
 
 from .repo_intel.router import router as repo_intel_router
+from .api_health.router import router as api_health_router
 
 try:
     from .agent_runtime.copilot_agent import copilot_enabled, copilot_manager
@@ -59,6 +60,7 @@ settings = get_settings()
 app = FastAPI(title="SAW API", version="0.1.0")
 
 app.include_router(repo_intel_router)
+app.include_router(api_health_router)
 
 app.add_middleware(
     CORSMiddleware,

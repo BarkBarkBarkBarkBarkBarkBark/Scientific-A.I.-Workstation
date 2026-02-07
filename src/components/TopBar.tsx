@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
 
 export function TopBar() {
@@ -10,6 +10,15 @@ export function TopBar() {
   const reflowPipeline = useSawStore((s) => s.reflowPipeline)
   const pluginCatalog = useSawStore((s) => s.pluginCatalog)
   const [utilitiesOpen, setUtilitiesOpen] = useState(false)
+
+  useEffect(() => {
+    if (!utilitiesOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setUtilitiesOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [utilitiesOpen])
 
   const utilities = useMemo(() => {
     return pluginCatalog
@@ -43,12 +52,33 @@ export function TopBar() {
     }))
   }
 
+  const logUtilityInfo = (message: string) => {
+    useSawStore.setState((s) => ({
+      logs: [...s.logs, `[utilities] ${message}`],
+    }))
+  }
+
   const getOutputPath = (obj: any, path: string | undefined) => {
     if (!path) return undefined
     return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), obj)
   }
 
-  const launchUtility = async (pluginId: string, outputPath?: string) => {
+  const normalizeLoopbackUrl = (url: string) => {
+    try {
+      const u = new URL(url)
+      if (u.hostname === '127.0.0.1' || u.hostname === '0.0.0.0') u.hostname = 'localhost'
+      return u.toString()
+    } catch {
+      return String(url || '')
+    }
+  }
+
+  const launchUtility = async (
+    pluginId: string,
+    outputPath?: string,
+    tab?: Window | null,
+    opts?: { logUrlIfNoPopup?: boolean; popupBlocked?: boolean },
+  ) => {
     try {
       const r = await fetch('/api/saw/plugins/execute', {
         method: 'POST',
@@ -67,8 +97,40 @@ export function TopBar() {
       if (typeof url !== 'string' || !url.startsWith('http')) {
         throw new Error('Utility did not return a valid URL')
       }
-      window.open(url, '_blank', 'noopener,noreferrer')
+      const href = normalizeLoopbackUrl(url)
+      if (tab && !tab.closed) {
+        try {
+          tab.location.assign(href)
+        } catch {
+          window.open(href, '_blank')
+        }
+      } else {
+        // If we don't have a popup/tab handle (often due to popup blockers),
+        // still make the URL available for manual open.
+        if (opts?.logUrlIfNoPopup) {
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[utilities] Open manually:', href)
+          } catch {
+            // ignore
+          }
+          if (opts?.popupBlocked) {
+            logUtilityError(`UtilityLaunchError: ${pluginId}: popup blocked (open manually): ${href}`)
+          } else {
+            logUtilityInfo(`Open manually: ${href}`)
+          }
+        } else {
+          window.open(href, '_blank')
+        }
+      }
     } catch (e: any) {
+      if (tab && !tab.closed) {
+        try {
+          tab.close()
+        } catch {
+          // ignore
+        }
+      }
       logUtilityError(`UtilityLaunchError: ${pluginId}: ${String(e?.message ?? e)}`)
     }
   }
@@ -83,7 +145,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-4">
-        <div className="relative">
+        <div className="relative z-50">
           <button
             type="button"
             onClick={() => setUtilitiesOpen((v) => !v)}
@@ -94,36 +156,58 @@ export function TopBar() {
             Utilities
           </button>
           {utilitiesOpen && (
-            <div
-              className="absolute right-0 mt-2 w-72 rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-200 shadow-lg"
-              role="menu"
-            >
-              {groupedUtilities.length === 0 ? (
-                <div className="px-2 py-2 text-zinc-500">No utilities discovered yet.</div>
-              ) : (
-                groupedUtilities.map(([group, items]) => (
-                  <div key={group} className="mb-2 last:mb-0">
-                    <div className="px-2 py-1 text-[11px] font-semibold uppercase text-zinc-500">{group}</div>
-                    <div className="space-y-1">
-                      {items.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="flex w-full flex-col rounded-md px-2 py-1 text-left hover:bg-zinc-900"
-                          onClick={() => {
-                            setUtilitiesOpen(false)
-                            launchUtility(item.id, item.launch?.expect?.output_path)
-                          }}
-                        >
-                          <span className="font-semibold text-zinc-100">{item.label}</span>
-                          <span className="text-[11px] text-zinc-500">{item.description}</span>
-                        </button>
-                      ))}
+            <>
+              {/* Click-away backdrop so the menu doesn't get "stuck" open. */}
+              <button
+                type="button"
+                aria-label="Close utilities menu"
+                className="fixed inset-0 z-40 cursor-default bg-transparent"
+                onClick={() => setUtilitiesOpen(false)}
+              />
+              <div
+                className="absolute right-0 z-50 mt-2 w-72 max-h-[70vh] overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-200 shadow-lg"
+                role="menu"
+              >
+                {groupedUtilities.length === 0 ? (
+                  <div className="px-2 py-2 text-zinc-500">No utilities discovered yet.</div>
+                ) : (
+                  groupedUtilities.map(([group, items]) => (
+                    <div key={group} className="mb-2 last:mb-0">
+                      <div className="px-2 py-1 text-[11px] font-semibold uppercase text-zinc-500">{group}</div>
+                      <div className="space-y-1">
+                        {items.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="flex w-full flex-col rounded-md px-2 py-1 text-left hover:bg-zinc-900"
+                            onClick={() => {
+                              setUtilitiesOpen(false)
+                              // Open the tab synchronously to avoid popup blockers.
+                              // We intentionally do not use noopener here because we need a window handle
+                              // to navigate after the async plugin launch completes.
+                              const tab = window.open('about:blank', '_blank')
+                              if (!tab) {
+                                // Popup blocked. Still launch the utility so we can surface the URL.
+                                // Still run it so we can print/log the resulting URL.
+                                launchUtility(item.id, item.launch?.expect?.output_path, null, {
+                                  logUrlIfNoPopup: true,
+                                  popupBlocked: true,
+                                })
+                                return
+                              }
+                              launchUtility(item.id, item.launch?.expect?.output_path, tab)
+                            }}
+                          >
+                            <span className="font-semibold text-zinc-100">{item.label}</span>
+                            <span className="text-[11px] text-zinc-500">{item.description}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))
-              )}
-            </div>
+                  ))
+                )}
+              </div>
+            </>
           )}
         </div>
 
