@@ -113,13 +113,26 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
         return {"status": "error", "error": "OPENAI_API_KEY missing", "conversation_id": conversation_id}
 
     st = get_conv(conversation_id)
+
+    raw_text = str(message or "").strip()
+    # The frontend may wrap the real user message in an ephemeral UI context block like:
+    #   SAW_UI_CONTEXT ...\n\nUSER_MESSAGE:\n<text>
+    # Routing heuristics should apply ONLY to <text>, not to the UI context (which frequently
+    # contains the substring "plugin" and can cause false positives).
+    ui_context = ""
+    user_text = raw_text
+    if "USER_MESSAGE:" in raw_text:
+        before, after = raw_text.split("USER_MESSAGE:", 1)
+        ui_context = before.strip()
+        user_text = after.strip()
+
     append_agent_event(
         settings,
         {
             "type": "agent.chat.request",
             "conversation_id": st.id,
-            "message_len": len(str(message or "")),
-            "message": maybe_log_text(str(message or "")),
+            "message_len": len(user_text),
+            "message": maybe_log_text(user_text),
         },
     )
     if st.pending is not None:
@@ -137,7 +150,6 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
             "tool_call": {"id": st.pending.id, "name": st.pending.name, "arguments": st.pending.arguments},
         }
 
-    user_text = str(message or "").strip()
     if not user_text:
         return {"status": "error", "error": "missing_message", "conversation_id": st.id}
 
@@ -162,12 +174,17 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
                 "message": maybe_log_text(q),
             },
         )
-        return {"status": "ok", "conversation_id": st.id, "message": q, "model": model}
+        return {"status": "ok", "conversation_id": st.id, "message": q, "model": "router"}
 
     st.messages.append({"role": "user", "content": user_text})
 
     client = OpenAI(api_key=settings.openai_api_key)
     model = agent_model()
+
+    # Provide UI context as part of the system prompt for this turn (ephemeral; not persisted).
+    sys = system_prompt()
+    if ui_context:
+        sys = f"{sys}\n\n{ui_context}"
 
     # Tool loop: execute read tools automatically; stop + request approval on write tools.
     max_steps = 10
@@ -175,7 +192,7 @@ def agent_chat(*, conversation_id: str | None, message: str) -> dict[str, Any]:
     for _ in range(max_steps):
         resp = client.chat.completions.create(
             model=model,
-            messages=[{"role": "system", "content": system_prompt()}, *st.messages],
+            messages=[{"role": "system", "content": sys}, *st.messages],
             tools=TOOLS,
             tool_choice="auto",
         )

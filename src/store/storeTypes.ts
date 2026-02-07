@@ -118,6 +118,7 @@ export type SawState = {
   submitGoal: (goal: string) => Promise<void>
 
   sendChat: (text: string) => Promise<void>
+  stopChat: () => void
   setChatProvider: (provider: 'copilot' | 'openai') => void
   approvePendingTool: (approved: boolean) => Promise<void>
   clearChat: () => void

@@ -32,7 +32,12 @@ export async function requestAiPlan(goal: string, plugins: PluginDefinition[]): 
 }
 
 export type ChatRole = 'system' | 'user' | 'assistant'
-export type ChatMessage = { role: ChatRole; content: string }
+export type ChatMessage = {
+  role: ChatRole
+  content: string
+  provider?: string
+  model?: string
+}
 
 export type AgentToolCall = { id: string; name: string; arguments: any }
 export type AgentChatResponse =
@@ -52,12 +57,14 @@ export async function requestAgentChat(
   conversationId: string | null,
   message: string,
   provider?: AgentProvider,
+  signal?: AbortSignal,
 ): Promise<AgentChatResponse> {
   const url = provider ? `/api/saw/agent/chat?provider=${encodeURIComponent(provider)}` : '/api/saw/agent/chat'
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversation_id: conversationId, message }),
+    signal,
   })
   if (!r.ok) {
     const t = await r.text()
@@ -114,6 +121,7 @@ export async function requestAgentChatStream(
   message: string,
   provider: AgentProvider | undefined,
   onEvent: (ev: AgentSseEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const url = provider
     ? `/api/saw/agent/chat?stream=1&provider=${encodeURIComponent(provider)}`
@@ -122,6 +130,7 @@ export async function requestAgentChatStream(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversation_id: conversationId, message }),
+    signal,
   })
 
   if (!r.ok) {

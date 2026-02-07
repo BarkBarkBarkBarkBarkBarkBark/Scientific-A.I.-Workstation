@@ -26,6 +26,7 @@ from .settings import get_settings
 from .bootstrap import bootstrap
 from .service_manager import startup_recover, stop_service
 from .agent import agent_chat, agent_approve
+from .agent_runtime.core import agent_model
 from .agent_runtime.health_state import get_last_agent_error
 
 from .repo_intel.router import router as repo_intel_router
@@ -196,9 +197,18 @@ async def agent_chat_post(req: AgentChatRequest, stream: bool = Query(False), pr
     # Streaming SSE mode (required for Copilot tool approval gating)
     async def gen_openai_once() -> Any:
         # Wrap the existing sync agent in a single-shot SSE stream.
-        r = agent_chat(conversation_id=req.conversation_id, message=req.message)
-        cid = (r or {}).get("conversation_id") or req.conversation_id or ""
-        yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.started', 'payload': {'provider': 'openai'}})}\n\n"
+        # If something goes wrong, emit a structured error instead of crashing the stream.
+        cid = (req.conversation_id or "")
+        yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.started', 'payload': {'provider': 'openai', 'model': agent_model()}})}\n\n"
+
+        try:
+            r = agent_chat(conversation_id=req.conversation_id, message=req.message)
+        except Exception as e:
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.error', 'payload': {'message': str(e)}})}\n\n"
+            yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'session.idle', 'payload': {}})}\n\n"
+            return
+
+        cid = (r or {}).get("conversation_id") or cid
         if (r or {}).get("status") == "needs_approval":
             tc = (r or {}).get("tool_call") or {}
             yield f"event: saw.agent.event\ndata: {json.dumps({'conversation_id': cid, 'type': 'permission.request', 'payload': {'kind': 'write', 'toolCallId': tc.get('id'), 'details': tc}})}\n\n"

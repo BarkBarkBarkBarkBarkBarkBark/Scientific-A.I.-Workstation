@@ -72,8 +72,10 @@ function buildUiContextForAgent(state: SawState): string {
 export function createChatSlice(
   set: (partial: Partial<SawState> | ((s: SawState) => Partial<SawState>), replace?: boolean) => void,
   get: () => SawState,
-): Pick<SawState, 'chatBusy' | 'chat' | 'sendChat' | 'setChatProvider' | 'approvePendingTool' | 'clearChat'> {
+): Pick<SawState, 'chatBusy' | 'chat' | 'sendChat' | 'stopChat' | 'setChatProvider' | 'approvePendingTool' | 'clearChat'> {
   const desiredProvider = loadProvider()
+
+  let activeAbort: AbortController | null = null
   return {
     chatBusy: false,
     chat: {
@@ -114,12 +116,38 @@ export function createChatSlice(
       }))
     },
 
+    stopChat: () => {
+      if (activeAbort) {
+        try {
+          activeAbort.abort()
+        } catch {
+          // ignore
+        }
+        activeAbort = null
+      }
+      set((s) => ({
+        chatBusy: false,
+        chat: { ...s.chat, pendingTool: null },
+        logs: [...s.logs, '[chat] stopped'],
+      }))
+    },
+
     sendChat: async (text: string) => {
       const content = text.trim()
       if (!content) return
 
       const uiContext = buildUiContextForAgent(get())
       const messageForAgent = `${uiContext}\n\nUSER_MESSAGE:\n${content}`
+
+      // Cancel any existing in-flight request (defensive).
+      if (activeAbort) {
+        try {
+          activeAbort.abort()
+        } catch {
+          // ignore
+        }
+      }
+      activeAbort = new AbortController()
 
       set({ chatBusy: true })
       set((s) => ({
@@ -131,7 +159,8 @@ export function createChatSlice(
       // Prepare an assistant message slot for streaming updates.
       let assistantIndex = -1
       set((s) => {
-        const msgs = [...s.chat.messages, { role: 'assistant' as const, content: '' }]
+        const desired = s.chat.desiredProvider ?? 'copilot'
+        const msgs = [...s.chat.messages, { role: 'assistant' as const, content: '', provider: desired }]
         assistantIndex = msgs.length - 1
         return { chat: { ...s.chat, messages: msgs } }
       })
@@ -145,7 +174,18 @@ export function createChatSlice(
 
         if (t === 'session.started') {
           const provider = String(ev.payload?.provider ?? '').trim()
+          const model = String(ev.payload?.model ?? '').trim()
           if (provider) set((s) => ({ chat: { ...s.chat, provider } }))
+          if (provider || model) {
+            set((s) => {
+              const msgs = [...s.chat.messages]
+              const i = assistantIndex >= 0 ? assistantIndex : msgs.length - 1
+              const cur = msgs[i] as any
+              if (cur?.role !== 'assistant') return {}
+              msgs[i] = { ...cur, provider: provider || cur.provider, model: model || cur.model }
+              return { chat: { ...s.chat, messages: msgs } }
+            })
+          }
           return
         }
 
@@ -214,14 +254,19 @@ export function createChatSlice(
         const state = get()
         const provider = state.chat.desiredProvider
         // Prefer SSE (works for Copilot mode; OpenAI mode returns a one-shot SSE too).
-        await requestAgentChatStream(state.chat.conversationId, messageForAgent, provider, applyEvent)
+        await requestAgentChatStream(state.chat.conversationId, messageForAgent, provider, applyEvent, activeAbort.signal)
 
         // If the stream didn't deliver anything, fall back to JSON.
         const after = get()
         const lastAssistant = after.chat.messages[assistantIndex]
         const empty = !lastAssistant || String((lastAssistant as any).content ?? '').trim().length === 0
         if (empty) {
-          const r = await requestAgentChat(after.chat.conversationId, messageForAgent, after.chat.desiredProvider)
+          const r = await requestAgentChat(
+            after.chat.conversationId,
+            messageForAgent,
+            after.chat.desiredProvider,
+            activeAbort.signal,
+          )
           const status = (r as any).status
           const cid = (r as any).conversation_id ?? after.chat.conversationId
           const pending = status === 'needs_approval' ? ((r as any).tool_call ?? null) : null
@@ -229,11 +274,13 @@ export function createChatSlice(
             status === 'needs_approval'
               ? `Approval required: ${(pending as any)?.name ?? 'tool'}`
               : (r as any).message || (r as any).error || ''
+          const model = String((r as any).model ?? '').trim()
+          const p = String(after.chat.desiredProvider ?? '').trim()
 
           set((s) => {
             const msgs = [...s.chat.messages]
             const i = assistantIndex >= 0 ? assistantIndex : msgs.length - 1
-            msgs[i] = { role: 'assistant' as const, content: msg }
+            msgs[i] = { role: 'assistant' as const, content: msg, provider: p || (msgs[i] as any)?.provider, model }
             return {
               chatBusy: false,
               chat: {
@@ -247,6 +294,20 @@ export function createChatSlice(
           })
         }
       } catch (e: any) {
+        // Stop button / AbortController cancellation.
+        if (String(e?.name ?? '') === 'AbortError') {
+          set((s) => {
+            const msgs = [...s.chat.messages]
+            const i = assistantIndex >= 0 ? assistantIndex : msgs.length - 1
+            const cur = msgs[i] as any
+            const curText = String(cur?.content ?? '').trim()
+            if (cur?.role === 'assistant' && !curText) {
+              msgs[i] = { ...cur, content: 'Stopped.' }
+            }
+            return { chatBusy: false, chat: { ...s.chat, pendingTool: null, messages: msgs } }
+          })
+          return
+        }
         set((s) => ({
           chatBusy: false,
           bottomTab: 'errors',
@@ -264,6 +325,8 @@ export function createChatSlice(
             ],
           },
         }))
+      } finally {
+        activeAbort = null
       }
     },
 
@@ -290,13 +353,15 @@ export function createChatSlice(
           status === 'needs_approval'
             ? `Approval required: ${((nextPending as any)?.name ?? 'tool') as string}`
             : (r as any).message || (r as any).error || ''
+        const model = String((r as any).model ?? '').trim()
+        const p = String(state.chat.desiredProvider ?? '').trim()
         set((s) => ({
           chatBusy: false,
           chat: {
             ...s.chat,
             conversationId: nextCid,
             pendingTool: nextPending,
-            messages: [...s.chat.messages, { role: 'assistant', content: msg }],
+            messages: [...s.chat.messages, { role: 'assistant', content: msg, provider: p || s.chat.provider || undefined, model }],
           },
         }))
       } catch (e: any) {

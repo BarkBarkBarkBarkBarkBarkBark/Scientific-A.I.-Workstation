@@ -56,6 +56,7 @@ export function ChatPanel() {
   const approvePendingTool = useSawStore((s) => s.approvePendingTool)
   const busy = useSawStore((s) => s.chatBusy)
   const sendChat = useSawStore((s) => s.sendChat)
+  const stopChat = useSawStore((s) => s.stopChat)
   const provider = useSawStore((s) => s.chat.provider ?? null)
   const desiredProvider = useSawStore((s) => s.chat.desiredProvider ?? 'copilot')
   const setChatProvider = useSawStore((s) => s.setChatProvider)
@@ -255,7 +256,21 @@ export function ChatPanel() {
               ].join(' ')}
             >
               <div className="mb-1 text-[11px] font-semibold text-zinc-500">
-                {m.role === 'user' ? 'You' : 'SAW'}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span>{m.role === 'user' ? 'You' : 'SAW'}</span>
+                    {m.role === 'assistant' && (m as any).provider && (
+                      <span className="font-mono text-zinc-400">
+                        {(() => {
+                          const p = String((m as any).provider ?? '').trim()
+                          const model = String((m as any).model ?? '').trim()
+                          if (model && p && model !== p) return `${p} / ${model}`
+                          return p || model
+                        })()}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="whitespace-pre-wrap text-sm leading-relaxed">{m.content}</div>
               {m.role === 'assistant' && parsePatchProposalFromAssistant(m.content).ok && (
@@ -399,13 +414,23 @@ export function ChatPanel() {
           className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-700"
           disabled={busy}
         />
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-zinc-50 hover:bg-emerald-600 disabled:opacity-50"
-        >
-          Send
-        </button>
+        {busy ? (
+          <button
+            type="button"
+            onClick={stopChat}
+            className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900"
+            title="Stop the current chat request"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-zinc-50 hover:bg-emerald-600 disabled:opacity-50"
+          >
+            Send
+          </button>
+        )}
       </form>
     </div>
   )

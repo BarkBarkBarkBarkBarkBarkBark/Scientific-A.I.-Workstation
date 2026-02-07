@@ -412,7 +412,7 @@ class CopilotAgentManager:
                 pass
 
         unsubscribe = conv.session.on(on_event)
-        conv.emit(_saw_event(conv.conversation_id, "session.started", {"provider": "copilot"}))
+        conv.emit(_saw_event(conv.conversation_id, "session.started", {"provider": "copilot", "model": "copilot"}))
 
         # Serialize sends per conversation.
         async def run_send() -> None:
