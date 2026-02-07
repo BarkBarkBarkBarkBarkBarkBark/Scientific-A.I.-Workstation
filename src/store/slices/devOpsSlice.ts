@@ -10,13 +10,14 @@ export function createDevOpsSlice(
   | 'devAttachPath'
   | 'devDetachPath'
   | 'devClearAttachments'
+  | 'setDangerousPluginHotEditEnabled'
   | 'applyPatch'
   | 'commitAll'
   | 'grantWriteCaps'
   | 'clearLastForbidden'
 > {
   return {
-    dev: { attachedPaths: [] },
+    dev: { attachedPaths: [], dangerousPluginHotEditEnabled: false },
 
     devAttachPath: (path: string) => {
       const p = String(path || '').replaceAll('\\', '/')
@@ -33,6 +34,11 @@ export function createDevOpsSlice(
     },
 
     devClearAttachments: () => set((s) => ({ dev: { ...s.dev, attachedPaths: [] } })),
+
+    setDangerousPluginHotEditEnabled: (enabled: boolean) => {
+      const v = Boolean(enabled)
+      set((s) => ({ dev: { ...s.dev, dangerousPluginHotEditEnabled: v } }))
+    },
 
     clearLastForbidden: () => set((s) => ({ dev: { ...s.dev, lastForbidden: null } })),
 

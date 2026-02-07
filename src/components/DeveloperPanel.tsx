@@ -150,6 +150,8 @@ export function DeveloperPanel() {
   const declarativeUiDev = useSawStore((s) => s.declarativeUiDev)
   const setDeclarativeUiDevEnabled = useSawStore((s) => s.setDeclarativeUiDevEnabled)
   const clearDeclarativeUiDevSnapshots = useSawStore((s) => s.clearDeclarativeUiDevSnapshots)
+  const dangerousHotEdit = useSawStore((s) => s.dev?.dangerousPluginHotEditEnabled ?? false)
+  const setDangerousHotEdit = useSawStore((s) => s.setDangerousPluginHotEditEnabled)
 
   const declarativeUiSnapshots = useMemo(() => {
     const snaps = Object.values(declarativeUiDev.snapshots ?? {})
@@ -509,6 +511,26 @@ export function DeveloperPanel() {
               {attestationRaw ? (
                 <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-200">{attestationRaw}</pre>
               ) : null}
+            </details>
+
+            <details className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/30 p-2">
+              <summary className="cursor-pointer select-none text-[11px] font-semibold text-zinc-300">
+                Dangerous Editing
+              </summary>
+
+              <div className="mt-2 space-y-2">
+                <label className="flex items-center gap-2 text-[11px] text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={dangerousHotEdit}
+                    onChange={(e) => setDangerousHotEdit(e.target.checked)}
+                  />
+                  enable hot-edit for <span className="font-mono text-zinc-200">saw-workspace/plugins/**</span>
+                </label>
+                <div className="text-[11px] text-zinc-500">
+                  Requires Editable Mode. Saves still go through Patch Engine caps and can fail if W is not granted.
+                </div>
+              </div>
             </details>
 
             <details className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/30 p-2">

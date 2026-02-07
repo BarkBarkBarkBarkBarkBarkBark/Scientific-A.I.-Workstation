@@ -16,13 +16,18 @@ export function ReadOnlyFileViewer(props: { path: string; canEdit?: boolean }) {
   const [draft, setDraft] = useState<string>('')
   const [status, setStatus] = useState<string>('')
   const [locked, setLocked] = useState<boolean>(true)
+  const [saveAbort, setSaveAbort] = useState<AbortController | null>(null)
 
   const language = useMemo(() => langFor(path), [path])
 
   const canEdit = Boolean(props.canEdit)
+  const saving = Boolean(saveAbort)
 
   useEffect(() => {
+    // Editable Mode (when permitted by the caller) should unlock immediately.
+    // When not permitted, force read-only.
     if (!canEdit) setLocked(true)
+    else setLocked(false)
   }, [canEdit])
 
   useEffect(() => {
@@ -48,22 +53,45 @@ export function ReadOnlyFileViewer(props: { path: string; canEdit?: boolean }) {
   async function saveToDisk() {
     try {
       if (!path) return
+      if (saveAbort) {
+        // Defensive: if a save is already running, cancel it first.
+        try {
+          saveAbort.abort()
+        } catch {
+          // ignore
+        }
+      }
+
+      const ac = new AbortController()
+      setSaveAbort(ac)
       setStatus('saving…')
       const r = await fetch('/api/dev/safe/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, content: draft }),
+        signal: ac.signal,
       })
       if (!r.ok) throw new Error(await r.text())
       setContent(draft)
       setStatus('saved')
     } catch (e: any) {
-      setStatus(`save failed: ${String(e?.message ?? e)}`)
+      if (String(e?.name ?? '') === 'AbortError') {
+        setStatus('save stopped')
+      } else {
+        setStatus(`save failed: ${String(e?.message ?? e)}`)
+      }
+    } finally {
+      setSaveAbort(null)
     }
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
+      {canEdit ? (
+        <div className="rounded-md border border-amber-900/40 bg-amber-950/20 px-2 py-1 text-[11px] text-amber-200">
+          Dangerous hot edit enabled (workspace plugins only). Saves are approval/caps-gated.
+        </div>
+      ) : null}
       <div className="flex items-center justify-between gap-2">
         {status ? <div className="text-[11px] text-zinc-500">{status}</div> : <div />}
         <div className="flex items-center gap-2">
@@ -72,6 +100,7 @@ export function ReadOnlyFileViewer(props: { path: string; canEdit?: boolean }) {
               <button
                 type="button"
                 onClick={() => setLocked((v) => !v)}
+                disabled={saving}
                 className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-900"
                 title={locked ? 'Unlock editor for editing' : 'Lock editor (read-only)'}
               >
@@ -79,13 +108,31 @@ export function ReadOnlyFileViewer(props: { path: string; canEdit?: boolean }) {
               </button>
               <button
                 type="button"
-                disabled={locked}
+                disabled={locked || saving}
                 onClick={() => void saveToDisk()}
                 className="rounded-md bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-zinc-50 hover:bg-emerald-600 disabled:opacity-50"
                 title="Save file to disk"
               >
                 Save
               </button>
+              {saving ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!saveAbort) return
+                    try {
+                      saveAbort.abort()
+                      setStatus('stopping…')
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-900"
+                  title="Abort the current save request"
+                >
+                  Stop
+                </button>
+              ) : null}
             </>
           ) : null}
         </div>
