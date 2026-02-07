@@ -691,6 +691,7 @@ class PluginListItem(BaseModel):
     origin: Literal["stock", "dev"] = "dev"
     integrity: dict[str, Any] | None = None
     ui: dict[str, Any] | None = None
+    utility: dict[str, Any] | None = None
     meta: dict[str, Any] | None = None
     inputs: list[dict[str, Any]] = Field(default_factory=list)
     outputs: list[dict[str, Any]] = Field(default_factory=list)
@@ -774,6 +775,7 @@ def plugins_list() -> PluginListResponse:
                     origin=origin,
                     integrity=integrity,
                     ui=(m.ui.model_dump() if getattr(m, "ui", None) is not None else None),
+                    utility=(m.utility.model_dump() if getattr(m, "utility", None) is not None else None),
                     meta=(m.meta.model_dump() if getattr(m, "meta", None) is not None else None),
                     inputs=inputs,
                     outputs=outputs,

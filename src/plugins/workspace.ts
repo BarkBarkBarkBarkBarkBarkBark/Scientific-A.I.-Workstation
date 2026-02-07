@@ -11,6 +11,20 @@ export type WorkspacePluginListItem = {
   origin?: 'stock' | 'dev'
   integrity?: { expected: string; actual: string; restored: boolean } | null
   ui?: { mode?: 'schema' | 'bundle'; schema_file?: string; bundle_file?: string; sandbox?: boolean } | null
+  utility?: {
+    kind?: 'external_tab'
+    label?: string
+    description?: string
+    menu_path?: string[]
+    icon?: string
+    launch?: {
+      action?: 'run_plugin'
+      open_target?: 'new_tab'
+      expect?: { type?: 'url'; output_path?: string }
+      app?: { kind?: 'streamlit' | 'http'; healthcheck?: string }
+      session?: { allow_multiple?: boolean; reuse_when_open?: boolean }
+    }
+  } | null
   meta?: Record<string, any> | null
   inputs?: Array<{ id: string; name: string; type: string }>
   outputs?: Array<{ id: string; name: string; type: string }>
@@ -58,8 +72,8 @@ export async function fetchWorkspacePlugins(apiBase = 'http://127.0.0.1:5127'): 
       sourcePaths,
       locked: Boolean(p.locked),
       origin: p.origin === 'stock' ? 'stock' : 'dev',
-        integrity: p.integrity ?? null,
-        meta: (p.meta && typeof p.meta === 'object') ? p.meta : null,
+      integrity: p.integrity ?? null,
+      meta: p.meta && typeof p.meta === 'object' ? p.meta : null,
       ui:
         p.ui && (p.ui.mode === 'schema' || p.ui.mode === 'bundle')
           ? {
@@ -69,11 +83,63 @@ export async function fetchWorkspacePlugins(apiBase = 'http://127.0.0.1:5127'): 
               sandbox: typeof p.ui.sandbox === 'boolean' ? p.ui.sandbox : undefined,
             }
           : null,
+      utility:
+        p.utility && typeof p.utility === 'object'
+          ? {
+              kind: p.utility.kind === 'external_tab' ? 'external_tab' : undefined,
+              label: typeof p.utility.label === 'string' ? p.utility.label : undefined,
+              description: typeof p.utility.description === 'string' ? p.utility.description : undefined,
+              menu_path: Array.isArray(p.utility.menu_path) ? p.utility.menu_path.map(String) : undefined,
+              icon: typeof p.utility.icon === 'string' ? p.utility.icon : undefined,
+              launch:
+                p.utility.launch && typeof p.utility.launch === 'object'
+                  ? {
+                      action: p.utility.launch.action === 'run_plugin' ? 'run_plugin' : undefined,
+                      open_target: p.utility.launch.open_target === 'new_tab' ? 'new_tab' : undefined,
+                      expect:
+                        p.utility.launch.expect && typeof p.utility.launch.expect === 'object'
+                          ? {
+                              type: p.utility.launch.expect.type === 'url' ? 'url' : undefined,
+                              output_path:
+                                typeof p.utility.launch.expect.output_path === 'string'
+                                  ? p.utility.launch.expect.output_path
+                                  : undefined,
+                            }
+                          : undefined,
+                      app:
+                        p.utility.launch.app && typeof p.utility.launch.app === 'object'
+                          ? {
+                              kind:
+                                p.utility.launch.app.kind === 'streamlit' || p.utility.launch.app.kind === 'http'
+                                  ? p.utility.launch.app.kind
+                                  : undefined,
+                              healthcheck:
+                                typeof p.utility.launch.app.healthcheck === 'string'
+                                  ? p.utility.launch.app.healthcheck
+                                  : undefined,
+                            }
+                          : undefined,
+                      session:
+                        p.utility.launch.session && typeof p.utility.launch.session === 'object'
+                          ? {
+                              allow_multiple:
+                                typeof p.utility.launch.session.allow_multiple === 'boolean'
+                                  ? p.utility.launch.session.allow_multiple
+                                  : undefined,
+                              reuse_when_open:
+                                typeof p.utility.launch.session.reuse_when_open === 'boolean'
+                                  ? p.utility.launch.session.reuse_when_open
+                                  : undefined,
+                            }
+                          : undefined,
+                    }
+                  : undefined,
+            }
+          : null,
       inputs: toPorts(p.inputs),
       outputs: toPorts(p.outputs),
       parameters: toParams(p.parameters),
     } satisfies PluginDefinition
   })
 }
-
 

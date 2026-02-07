@@ -62,7 +62,11 @@ Scientific AI Workstation
                runs_services.sql 
             tests
                 test_env_hashing.py
-                test_port_allocation.py
+               test_port_allocation.py
+
+Recent updates
+    - Added utility plugins that launch Streamlit apps in new browser tabs (file browser, DB explorer, RAG explorer, API health explorer).
+    - Top bar now includes a Utilities menu sourced from plugin manifests.
 
 ###################################################################
 

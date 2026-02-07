@@ -36,3 +36,7 @@ Evidence kinds are standardized as:
 
 Until that exists, `attestation/default_probes.v1.json` is the source-of-truth for which probes/files must be included.
 
+## Recent updates
+
+- Added utility plugin support for launching Streamlit apps in new browser tabs (file browser, DB explorer, RAG explorer, API health explorer).
+- Frontend now surfaces utilities from plugin manifests in the top bar.

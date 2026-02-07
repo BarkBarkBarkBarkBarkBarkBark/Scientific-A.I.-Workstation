@@ -78,6 +78,38 @@ class PluginMeta(BaseModel):
     docs: dict[str, str] | None = None
 
 
+class UtilityLaunchExpect(BaseModel):
+    type: Literal["url"] = "url"
+    output_path: str = "result.data.url"
+
+
+class UtilityLaunchApp(BaseModel):
+    kind: Literal["streamlit", "http"] = "streamlit"
+    healthcheck: str | None = None
+
+
+class UtilityLaunchSession(BaseModel):
+    allow_multiple: bool = True
+    reuse_when_open: bool = True
+
+
+class UtilityLaunchSpec(BaseModel):
+    action: Literal["run_plugin"] = "run_plugin"
+    open_target: Literal["new_tab"] = "new_tab"
+    expect: UtilityLaunchExpect | None = None
+    app: UtilityLaunchApp | None = None
+    session: UtilityLaunchSession | None = None
+
+
+class UtilitySpec(BaseModel):
+    kind: Literal["external_tab"] = "external_tab"
+    label: str | None = None
+    description: str | None = None
+    menu_path: list[str] = Field(default_factory=list)
+    icon: str | None = None
+    launch: UtilityLaunchSpec | None = None
+
+
 class PluginManifest(BaseModel):
     id: str
     name: str
@@ -95,6 +127,7 @@ class PluginManifest(BaseModel):
     side_effects: SideEffectsSpec
     resources: ResourcesSpec
     ui: PluginUiSpec | None = None
+    utility: UtilitySpec | None = None
     meta: PluginMeta | None = None
 
 

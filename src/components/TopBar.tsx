@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { useSawStore } from '../store/useSawStore'
 
 export function TopBar() {
@@ -6,6 +7,70 @@ export function TopBar() {
   const layoutMode = useSawStore((s) => s.layoutMode)
   const setLayoutMode = useSawStore((s) => s.setLayoutMode)
   const reflowPipeline = useSawStore((s) => s.reflowPipeline)
+  const pluginCatalog = useSawStore((s) => s.pluginCatalog)
+  const [utilitiesOpen, setUtilitiesOpen] = useState(false)
+
+  const utilities = useMemo(() => {
+    return pluginCatalog
+      .filter((p) => p.utility?.kind === 'external_tab')
+      .map((p) => ({
+        id: p.id,
+        label: p.utility?.label || p.name,
+        description: p.utility?.description || p.description,
+        menuPath: (p.utility?.menu_path ?? []).filter(Boolean),
+        launch: p.utility?.launch,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [pluginCatalog])
+
+  const groupedUtilities = useMemo(() => {
+    const groups = new Map<string, typeof utilities>()
+    for (const item of utilities) {
+      const group = item.menuPath[1] || item.menuPath[0] || 'Utilities'
+      const list = groups.get(group) ?? []
+      list.push(item)
+      groups.set(group, list)
+    }
+    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [utilities])
+
+  const logUtilityError = (message: string) => {
+    useSawStore.setState((s) => ({
+      bottomTab: 'errors',
+      errors: [...s.errors, message],
+      logs: [...s.logs, `[utilities] ${message}`],
+    }))
+  }
+
+  const getOutputPath = (obj: any, path: string | undefined) => {
+    if (!path) return undefined
+    return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), obj)
+  }
+
+  const launchUtility = async (pluginId: string, outputPath?: string) => {
+    try {
+      const r = await fetch('/api/saw/plugins/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plugin_id: pluginId, inputs: {}, params: {} }),
+      })
+      if (!r.ok) {
+        const t = await r.text()
+        throw new Error(t)
+      }
+      const j = (await r.json()) as { ok: boolean; outputs?: any; error?: string }
+      if (!j.ok) {
+        throw new Error(j.error || 'Utility failed to launch')
+      }
+      const url = getOutputPath(j.outputs ?? {}, outputPath || 'result.data.url')
+      if (typeof url !== 'string' || !url.startsWith('http')) {
+        throw new Error('Utility did not return a valid URL')
+      }
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (e: any) {
+      logUtilityError(`UtilityLaunchError: ${pluginId}: ${String(e?.message ?? e)}`)
+    }
+  }
 
   return (
     <div className="flex h-12 items-center justify-between border-b border-zinc-800 bg-zinc-950/80 px-4">
@@ -17,6 +82,50 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-4">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setUtilitiesOpen((v) => !v)}
+            className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-200 hover:border-zinc-600"
+            aria-haspopup="menu"
+            aria-expanded={utilitiesOpen}
+          >
+            Utilities
+          </button>
+          {utilitiesOpen && (
+            <div
+              className="absolute right-0 mt-2 w-72 rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-200 shadow-lg"
+              role="menu"
+            >
+              {groupedUtilities.length === 0 ? (
+                <div className="px-2 py-2 text-zinc-500">No utilities discovered yet.</div>
+              ) : (
+                groupedUtilities.map(([group, items]) => (
+                  <div key={group} className="mb-2 last:mb-0">
+                    <div className="px-2 py-1 text-[11px] font-semibold uppercase text-zinc-500">{group}</div>
+                    <div className="space-y-1">
+                      {items.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="flex w-full flex-col rounded-md px-2 py-1 text-left hover:bg-zinc-900"
+                          onClick={() => {
+                            setUtilitiesOpen(false)
+                            launchUtility(item.id, item.launch?.expect?.output_path)
+                          }}
+                        >
+                          <span className="font-semibold text-zinc-100">{item.label}</span>
+                          <span className="text-[11px] text-zinc-500">{item.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
         <label className="flex items-center gap-2 text-xs text-zinc-300">
           <span className="text-zinc-400">Layout</span>
           <select
@@ -57,5 +166,4 @@ export function TopBar() {
     </div>
   )
 }
-
 

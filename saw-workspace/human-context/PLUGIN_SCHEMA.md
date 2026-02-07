@@ -38,6 +38,7 @@ Recommended keys:
 
 - `ui: { mode: schema, schema_file: ui/declarative_ui.yaml, bundle_file: ui/ui.bundle.js, sandbox: true }`
 - `meta:` — optional descriptive metadata (human + machine descriptions)
+- `utility:` — optional utility launcher metadata (e.g., `kind: external_tab`, `menu_path`, `launch.expect.output_path`)
 
 ## UI (Declarative UI)
 

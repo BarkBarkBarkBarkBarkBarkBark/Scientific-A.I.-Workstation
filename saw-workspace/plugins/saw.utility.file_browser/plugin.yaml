@@ -1,0 +1,57 @@
+id: "saw.utility.file_browser"
+name: "File Browser (Utility)"
+version: "0.1.0"
+description: "Browse workspace files in a separate Streamlit tab."
+category_path: "utilities"
+meta:
+  human_description: "Launch a Streamlit file browser in a new tab."
+  machine_description: "Utility plugin that starts a Streamlit file explorer and returns a URL."
+  tags: ["utility", "streamlit", "files"]
+entrypoint:
+  file: "wrapper.py"
+  callable: "main"
+environment:
+  python: ">=3.11,<3.13"
+  pip: ["streamlit"]
+inputs: {}
+params:
+  root_path:
+    type: "string"
+    default: ""
+    ui: { label: "Root path (workspace-relative, optional)" }
+outputs:
+  result:
+    type: "object"
+execution:
+  deterministic: false
+  cacheable: false
+side_effects:
+  network: "allowed"
+  disk: "read_only"
+  subprocess: "allowed"
+resources:
+  gpu: "forbidden"
+  threads: 1
+ui:
+  mode: "schema"
+  schema_file: "ui/declarative_ui.yaml"
+  bundle_file: "ui/ui.bundle.js"
+  sandbox: true
+utility:
+  kind: "external_tab"
+  label: "File Browser"
+  description: "Browse workspace files in a new tab."
+  menu_path: ["Utilities", "Files"]
+  icon: "folder"
+  launch:
+    action: "run_plugin"
+    open_target: "new_tab"
+    expect:
+      type: "url"
+      output_path: "result.data.url"
+    app:
+      kind: "streamlit"
+      healthcheck: "/_stcore/health"
+    session:
+      allow_multiple: true
+      reuse_when_open: true

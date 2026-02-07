@@ -1,0 +1,136 @@
+spec:
+  id: MR-SAW-Utilities-ExternalTabs-v0.1
+  title: Utilities plugins that launch external browser tabs (Streamlit + file/db explorers)
+  status: proposal
+  intent:
+    - "Allow certain plugins to launch a separate browser tab for utility UIs (Streamlit or HTTP)."
+    - "Keep plugin.yaml as the single source of truth for discoverability + menu placement."
+    - "Minimize future debt by reusing existing plugin execution + catalog flow."
+
+existing_system_context:
+  plugin_manifest:
+    file: services/saw_api/app/plugins_runtime.py
+    class: PluginManifest
+    ui_spec: PluginUiSpec
+  frontend_catalog:
+    types: src/types/saw.ts (PluginDefinition, PluginUiConfig)
+    loader: src/plugins/workspace.ts (fetchWorkspacePlugins)
+
+proposal:
+  manifest_extension:
+    add_field_to_plugin_manifest: utility
+    purpose: "Declare a plugin as a top-level utility and describe how to launch it."
+    yaml_shape:
+      utility:
+        kind: "external_tab"  # future: "inline_panel" | "modal" | "external_tab"
+        label: "Database Explorer"
+        description: "Explore data via Streamlit."
+        menu_path: ["Utilities", "Data"]
+        icon: "database"
+        launch:
+          action: "run_plugin"   # uses existing /api/plugins/{plugin_id}/run
+          open_target: "new_tab" # browser tab
+          expect:
+            type: "url"
+          output_path: "result.data.url"  # JSONPath-ish pointer into plugin outputs
+          app:
+            kind: "streamlit"    # "streamlit" | "http"
+            healthcheck: "/_stcore/health"
+          session:
+            allow_multiple: true
+            reuse_when_open: true
+
+  backend_runtime:
+    strategy:
+      - "Keep plugin execution unchanged; utilities are standard plugins."
+      - "Streamlit apps are started inside wrapper.py and return a URL in outputs."
+      - "Optional: add a tiny helper in SAW API to pick free ports (or keep in wrapper)."
+    wrapper_contract:
+      output_example:
+        result:
+          url: "http://127.0.0.1:8510"
+          status: "started"
+
+  frontend_integration:
+    menu_bar:
+      add_top_menu: true
+      utilities_group:
+        source: "plugin catalog entries with utility.kind == 'external_tab'"
+        click_behavior:
+          - "Call /api/plugins/{plugin_id}/run with defaults."
+          - "Read output_path for URL."
+          - "Open in new browser tab via window.open(url, '_blank')."
+    error_states:
+      - "If URL missing, show toast with stdout/stderr in inspector."
+      - "If server not reachable, show retry + open logs."
+
+  machine_readable_examples:
+    file_browser_plugin_yaml_snippet:
+      id: "saw.utility.file_browser"
+      name: "File Browser (Utility)"
+      version: "0.1.0"
+      description: "Browse workspace files in a separate tab."
+      category_path: "utilities"
+      entrypoint:
+        file: "wrapper.py"
+        callable: "main"
+      environment:
+        python: ">=3.11,<3.13"
+        pip: ["streamlit"]
+      ui:
+        mode: "schema"
+      utility:
+        kind: "external_tab"
+        label: "File Browser"
+        menu_path: ["Utilities", "Files"]
+        icon: "folder"
+        launch:
+          action: "run_plugin"
+          open_target: "new_tab"
+          expect:
+            type: "url"
+            output_path: "result.data.url"
+          app:
+            kind: "streamlit"
+            healthcheck: "/_stcore/health"
+          session:
+            allow_multiple: true
+            reuse_when_open: true
+
+    db_browser_plugin_yaml_snippet:
+      id: "saw.utility.db_browser"
+      name: "Database Browser (Utility)"
+      version: "0.1.0"
+      description: "Explore database tables via Streamlit."
+      category_path: "utilities"
+      entrypoint:
+        file: "wrapper.py"
+        callable: "main"
+      environment:
+        python: ">=3.11,<3.13"
+        pip: ["streamlit", "sqlalchemy"]
+      ui:
+        mode: "schema"
+      utility:
+        kind: "external_tab"
+        label: "Database Explorer"
+        menu_path: ["Utilities", "Data"]
+        icon: "database"
+        launch:
+          action: "run_plugin"
+          open_target: "new_tab"
+          expect:
+            type: "url"
+            output_path: "result.data.url"
+          app:
+            kind: "streamlit"
+            healthcheck: "/_stcore/health"
+          session:
+            allow_multiple: true
+            reuse_when_open: true
+
+acceptance_criteria:
+  - "A plugin manifest can declare utility.kind=external_tab and a launch spec."
+  - "Utilities appear in a top menu and open a new browser tab."
+  - "Streamlit-based utilities return a URL in plugin outputs and the UI opens it."
+  - "No change to existing plugin execution semantics or UI schema/bundle modes."

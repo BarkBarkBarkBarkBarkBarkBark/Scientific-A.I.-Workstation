@@ -1,0 +1,10 @@
+version: 1
+sections:
+  - type: builtin
+    component: node_inputs
+  - type: builtin
+    component: node_parameters
+  - type: builtin
+    component: run_panel
+  - type: builtin
+    component: plugin_description

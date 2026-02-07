@@ -25,6 +25,38 @@ export type PluginUiConfig = {
   sandbox?: boolean
 }
 
+export type UtilityLaunchExpect = {
+  type: 'url'
+  output_path: string
+}
+
+export type UtilityLaunchApp = {
+  kind?: 'streamlit' | 'http'
+  healthcheck?: string
+}
+
+export type UtilityLaunchSession = {
+  allow_multiple?: boolean
+  reuse_when_open?: boolean
+}
+
+export type UtilityLaunchSpec = {
+  action?: 'run_plugin'
+  open_target?: 'new_tab'
+  expect?: UtilityLaunchExpect
+  app?: UtilityLaunchApp
+  session?: UtilityLaunchSession
+}
+
+export type UtilitySpec = {
+  kind?: 'external_tab'
+  label?: string
+  description?: string
+  menu_path?: string[]
+  icon?: string
+  launch?: UtilityLaunchSpec
+}
+
 export type PluginDefinition = {
   id: string
   name: string
@@ -47,6 +79,7 @@ export type PluginDefinition = {
   origin?: 'stock' | 'dev'
   integrity?: { expected: string; actual: string; restored: boolean } | null
   ui?: PluginUiConfig | null
+  utility?: UtilitySpec | null
   meta?: Record<string, any> | null
   inputs: Port[]
   outputs: Port[]
@@ -116,4 +149,3 @@ export type PluginNodeData = {
 }
 
 export type PluginNode = Node<PluginNodeData, 'pluginNode'>
-
